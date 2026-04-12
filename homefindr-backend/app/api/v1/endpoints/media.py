@@ -33,7 +33,7 @@ def get_s3_client():
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
 async def upload_images(
     files: List[UploadFile] = File(...),
-    current_user: AgentOrAdmin = Depends(),
+    current_user: AgentOrAdmin,  # remove = Depends()
 ) -> dict:
     """
     Upload up to 20 images for a property listing.
@@ -99,7 +99,7 @@ async def upload_images(
 @router.delete("/delete")
 async def delete_media(
     key: str,
-    current_user: AgentOrAdmin = Depends(),
+    current_user: AgentOrAdmin,  # remove = Depends()
 ) -> dict:
     """Delete a media file from storage by its storage key."""
     # Ensure the key belongs to this user (security check)
