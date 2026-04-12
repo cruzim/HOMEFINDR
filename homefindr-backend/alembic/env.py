@@ -21,8 +21,7 @@ import app.models.models  # noqa: F401
 config = context.config
 config.set_main_option(
     "sqlalchemy.url",
-    # Use the sync psycopg2 URL for Alembic (not asyncpg)
-    settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://"),
+    settings.DATABASE_URL,
 )
 
 if config.config_file_name is not None:
