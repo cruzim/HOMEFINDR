@@ -1,0 +1,298 @@
+/**
+ * HomeFindr API client
+ * All calls go through here — handles auth tokens, errors, and base URL.
+ */
+
+const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+
+function getToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('hf_access_token');
+}
+
+export function setTokens(access: string, refresh: string) {
+  localStorage.setItem('hf_access_token', access);
+  localStorage.setItem('hf_refresh_token', refresh);
+}
+
+export function clearTokens() {
+  localStorage.removeItem('hf_access_token');
+  localStorage.removeItem('hf_refresh_token');
+}
+
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  retried = false,
+): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string>),
+  };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE}${path}`, { ...options, headers });
+
+  // Auto-refresh on 401
+  if (res.status === 401 && !retried) {
+    const refresh = localStorage.getItem('hf_refresh_token');
+    if (refresh) {
+      const ref = await fetch(`${BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refresh }),
+      });
+      if (ref.ok) {
+        const tokens = await ref.json();
+        setTokens(tokens.access_token, tokens.refresh_token);
+        return request<T>(path, options, true);
+      }
+    }
+    clearTokens();
+    if (typeof window !== 'undefined') window.location.href = '/auth/login';
+    throw new Error('Session expired');
+  }
+
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { detail = (await res.json()).detail || detail; } catch {}
+    throw new Error(detail);
+  }
+
+  if (res.status === 204) return {} as T;
+  return res.json();
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────
+
+export interface User {
+  id: string;
+  email: string;
+  full_name: string;
+  phone?: string;
+  photo_url?: string;
+  role: 'buyer' | 'agent' | 'manager' | 'admin';
+  is_active: boolean;
+  is_verified: boolean;
+  created_at: string;
+}
+
+export interface TokenPair {
+  access_token: string;
+  refresh_token: string;
+}
+
+export const auth = {
+  register: (body: { full_name: string; email: string; phone?: string; password: string; role: string }) =>
+    request<User>('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
+
+  login: (email: string, password: string) =>
+    request<TokenPair>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+
+  me: () => request<User>('/auth/me'),
+
+  googleOAuth: (code: string, redirect_uri: string) =>
+    request<TokenPair>('/auth/google', { method: 'POST', body: JSON.stringify({ code, redirect_uri }) }),
+
+  logout: () => request('/auth/logout', { method: 'POST' }),
+
+  updateProfile: (body: Partial<User> & { notif_push?: boolean; notif_email?: boolean; notif_sms?: boolean }) =>
+    request<User>('/users/me', { method: 'PATCH', body: JSON.stringify(body) }),
+};
+
+// ── Properties ────────────────────────────────────────────────────────
+
+export interface Property {
+  id: string;
+  title: string;
+  description?: string;
+  address: string;
+  area: string;
+  city: string;
+  state: string;
+  latitude?: number;
+  longitude?: number;
+  price: number;
+  property_type: string;
+  beds: number;
+  baths: number;
+  sqft: number;
+  lot_size?: number;
+  year_built?: number;
+  commission_pct: number;
+  amenities: string[];
+  highlights: string[];
+  images: string[];
+  virtual_tour_url?: string;
+  video_url?: string;
+  open_houses: Array<{ date: string; start: string; end: string }>;
+  status: string;
+  views: number;
+  saves: number;
+  agent?: {
+    id: string;
+    full_name: string;
+    photo_url?: string;
+    phone?: string;
+    email: string;
+  };
+  is_saved?: boolean;
+  created_at: string;
+}
+
+export interface PropertyList {
+  items: Property[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+}
+
+export interface PropertyFilters {
+  city?: string;
+  area?: string;
+  min_price?: number;
+  max_price?: number;
+  beds?: number;
+  baths?: number;
+  property_type?: string;
+  sort_by?: string;
+  page?: number;
+  page_size?: number;
+  status?: string;
+}
+
+export const properties = {
+  list: (filters: PropertyFilters = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([k, v]) => { if (v !== undefined && v !== '') params.set(k, String(v)); });
+    return request<PropertyList>(`/properties?${params}`);
+  },
+
+  get: (id: string) => request<Property>(`/properties/${id}`),
+
+  create: (body: object) =>
+    request<Property>('/properties', { method: 'POST', body: JSON.stringify(body) }),
+
+  update: (id: string, body: object) =>
+    request<Property>(`/properties/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  delete: (id: string) =>
+    request(`/properties/${id}`, { method: 'DELETE' }),
+
+  save: (id: string) =>
+    request(`/properties/${id}/save`, { method: 'POST' }),
+
+  unsave: (id: string) =>
+    request(`/properties/${id}/save`, { method: 'DELETE' }),
+
+  saved: (page = 1) =>
+    request<PropertyList>(`/properties/saved?page=${page}`),
+
+  myListings: () =>
+    request<Property[]>('/properties/my-listings'),
+};
+
+// ── Messages ──────────────────────────────────────────────────────────
+
+export interface Message {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  content: string;
+  attachments: object[];
+  is_read: boolean;
+  created_at: string;
+}
+
+export interface Conversation {
+  id: string;
+  property_id?: string;
+  buyer_id: string;
+  agent_id: string;
+  last_message_at?: string;
+  messages: Message[];
+  created_at: string;
+  // populated client-side
+  other_user?: User;
+  property?: Property;
+}
+
+export const messages = {
+  conversations: () => request<Conversation[]>('/messages/conversations'),
+
+  startConversation: (body: { agent_id: string; property_id?: string; first_message: string }) =>
+    request<Conversation>('/messages/conversations', { method: 'POST', body: JSON.stringify(body) }),
+
+  getMessages: (conversationId: string) =>
+    request<Message[]>(`/messages/conversations/${conversationId}/messages`),
+
+  send: (conversationId: string, content: string) =>
+    request<Message>(`/messages/conversations/${conversationId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content, attachments: [] }),
+    }),
+};
+
+// ── Offers ────────────────────────────────────────────────────────────
+
+export interface Offer {
+  id: string;
+  property_id: string;
+  buyer_id: string;
+  offer_price: number;
+  down_payment_pct: number;
+  preferred_closing_date?: string;
+  contingencies: string[];
+  notes?: string;
+  status: string;
+  counter_price?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export const offers = {
+  list: () => request<Offer[]>('/offers'),
+  get: (id: string) => request<Offer>(`/offers/${id}`),
+  create: (body: object) => request<Offer>('/offers', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: string, body: object) => request<Offer>(`/offers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+};
+
+// ── Viewings ──────────────────────────────────────────────────────────
+
+export interface Viewing {
+  id: string;
+  property_id: string;
+  buyer_id: string;
+  scheduled_at: string;
+  status: string;
+  notes?: string;
+  contact_name?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  created_at: string;
+}
+
+export const viewings = {
+  list: () => request<Viewing[]>('/viewings'),
+  create: (body: object) => request<Viewing>('/viewings', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: string, body: object) => request<Viewing>(`/viewings/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+};
+
+// ── Notifications ─────────────────────────────────────────────────────
+
+export interface Notification {
+  id: string;
+  title: string;
+  body: string;
+  type: string;
+  reference_id?: string;
+  is_read: boolean;
+  created_at: string;
+}
+
+export const notifications = {
+  list: () => request<Notification[]>('/users/me/notifications'),
+  markRead: (id: string) => request(`/users/me/notifications/${id}/read`, { method: 'PATCH' }),
+};

@@ -1,29 +1,108 @@
 'use client';
 
-import { useState, use } from 'react';
-import Image from 'next/image';
+import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Calendar, Clock, CheckCircle, Mail, Phone as PhoneIcon } from 'lucide-react';
-import { PROPERTIES } from '@/data/mock';
+import { ArrowLeft, Calendar, CheckCircle } from 'lucide-react';
+import { properties as propApi, viewings as viewApi, type Property } from '@/lib/api';
 import { formatFullPrice } from '@/lib/utils';
+import { useAuth } from '@/context/AuthContext';
+import { useRouter } from 'next/navigation';
+import toast from 'react-hot-toast';
 
 const TIMES = ['9:00 AM', '10:00 AM', '11:00 AM', '12:00 PM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM'];
 const DATES = Array.from({ length: 7 }, (_, i) => {
   const d = new Date(); d.setDate(d.getDate() + i + 1);
-  return { value: d.toISOString().split('T')[0], label: d.toLocaleDateString('en-NG', { weekday: 'short', month: 'short', day: 'numeric' }) };
+  return {
+    value: d.toISOString().split('T')[0],
+    label: d.toLocaleDateString('en-NG', { weekday: 'short', month: 'short', day: 'numeric' }),
+  };
 });
+
+function timeToISO(date: string, time: string): string {
+  const [h, rest] = time.split(':');
+  const [m, period] = rest.split(' ');
+  let hours = parseInt(h);
+  if (period === 'PM' && hours !== 12) hours += 12;
+  if (period === 'AM' && hours === 12) hours = 0;
+  return new Date(`${date}T${String(hours).padStart(2, '0')}:${m}:00`).toISOString();
+}
 
 export default function SchedulePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const property = PROPERTIES.find(p => p.id === id) ?? PROPERTIES[0];
+  const { user, loading } = useAuth();
+  const router = useRouter();
 
+  const [property, setProperty] = useState<Property | null>(null);
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', updates: true });
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '' });
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
-  const [calendarAdded, setCalendarAdded] = useState<Record<string, boolean>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
 
-  function setField(k: string, v: string | boolean) { setForm(f => ({ ...f, [k]: v })); }
+  useEffect(() => {
+    if (!loading && !user) { router.push('/auth/login'); return; }
+    if (user) {
+      setForm({ firstName: user.full_name.split(' ')[0] || '', lastName: user.full_name.split(' ').slice(1).join(' ') || '', email: user.email, phone: user.phone || '' });
+    }
+    propApi.get(id).then(setProperty).catch(() => {});
+  }, [id, user, loading, router]);
+
+  function setField(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
+
+  async function handleConfirm() {
+    if (!selectedDate || !selectedTime) { toast.error('Please select a date and time'); return; }
+    setSubmitting(true);
+    try {
+      await viewApi.create({
+        property_id: id,
+        scheduled_at: timeToISO(selectedDate, selectedTime),
+        contact_name: `${form.firstName} ${form.lastName}`.trim(),
+        contact_email: form.email,
+        contact_phone: form.phone || undefined,
+      });
+      setConfirmed(true);
+      toast.success('Viewing scheduled!');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to schedule viewing');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (loading || !user) {
+    return <div className="flex min-h-screen items-center justify-center"><div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /></div>;
+  }
+
+  if (confirmed) {
+    return (
+      <div className="min-h-[calc(100vh-64px)] bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
+          <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4">
+            <CheckCircle size={32} className="text-emerald-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Viewing Scheduled!</h2>
+          <p className="text-sm text-gray-500 mb-2">
+            <strong>{selectedDate}</strong> at <strong>{selectedTime}</strong>
+          </p>
+          {property && (
+            <p className="text-sm text-gray-500 mb-6">{property.title || property.address}, {property.city}</p>
+          )}
+          <p className="text-xs text-gray-400 mb-6">A confirmation will be sent to {form.email}</p>
+          <div className="flex gap-3">
+            <Link href="/dashboard/buyer" className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">
+              Dashboard
+            </Link>
+            {property && (
+              <Link href={`/listing/${id}`} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700">
+                Back to Listing
+              </Link>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const steps = ['Contact Info', 'Select Date', 'Confirm'];
 
@@ -31,232 +110,146 @@ export default function SchedulePage({ params }: { params: Promise<{ id: string 
     <div className="min-h-[calc(100vh-64px)] bg-gray-50 py-8 px-4">
       <div className="max-w-[1440px] mx-auto">
         <div className="flex flex-col lg:flex-row gap-8 items-start">
-          {/* Form */}
           <div className="flex-1 min-w-0">
-            <Link href={`/listing/${property.id}`} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-6">
+            <Link href={`/listing/${id}`} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-6">
               <ArrowLeft size={15} /> Back to Listing
             </Link>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-1">Schedule Your Private Tour</h1>
             <p className="text-sm text-gray-500 mb-7">Take the first step toward your new home. Choose a time that works for you.</p>
 
-            {/* Step indicator */}
-            <div className="flex items-center gap-0 mb-8">
+            {/* Steps */}
+            <div className="flex items-center gap-2 mb-8">
               {steps.map((s, i) => (
                 <div key={s} className="flex items-center flex-1 last:flex-none">
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${step > i + 1 ? 'bg-blue-600 text-white' : step === i + 1 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'}`}>
-                      {step > i + 1 ? <CheckCircle size={16} /> : i + 1}
-                    </div>
-                    <span className={`text-xs font-medium hidden sm:block ${step === i + 1 ? 'text-blue-600' : 'text-gray-400'}`}>{s}</span>
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${step > i + 1 ? 'bg-blue-600 text-white' : step === i + 1 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'}`}>
+                    {step > i + 1 ? <CheckCircle size={14} /> : i + 1}
                   </div>
-                  {i < steps.length - 1 && <div className={`flex-1 h-0.5 mx-2 ${step > i + 1 ? 'bg-blue-600' : 'bg-gray-200'}`} />}
+                  <span className={`text-xs font-medium ml-2 hidden sm:block ${step === i + 1 ? 'text-blue-600' : 'text-gray-400'}`}>{s}</span>
+                  {i < steps.length - 1 && <div className={`flex-1 h-0.5 mx-2 ${step > i + 1 ? 'bg-blue-500' : 'bg-gray-200'}`} />}
                 </div>
               ))}
             </div>
 
-            {/* Step 1 - Contact info */}
+            {/* Step 1: Contact */}
             {step === 1 && (
-              <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-                <h2 className="text-lg font-bold text-gray-900 mb-1">Your Information</h2>
-                <p className="text-sm text-gray-500 mb-5">We&apos;ll use this to contact you about the viewing.</p>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    {[{ key: 'firstName', label: 'First Name', placeholder: 'Tunde' }, { key: 'lastName', label: 'Last Name', placeholder: 'Adeyemi' }].map(f => (
-                      <div key={f.key}>
-                        <label className="text-sm font-medium text-gray-700 block mb-1.5">{f.label}</label>
-                        <input value={form[f.key as keyof typeof form] as string} onChange={e => setField(f.key, e.target.value)} placeholder={f.placeholder}
-                          className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                      </div>
-                    ))}
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
+                <h2 className="font-semibold text-gray-900">Your Contact Information</h2>
+                <div className="grid grid-cols-2 gap-4">
+                  {[
+                    { label: 'First Name', key: 'firstName', type: 'text' },
+                    { label: 'Last Name', key: 'lastName', type: 'text' },
+                  ].map(f => (
+                    <div key={f.key}>
+                      <label className="text-sm font-medium text-gray-700 block mb-1.5">{f.label}</label>
+                      <input type={f.type} value={form[f.key as keyof typeof form]} onChange={e => setField(f.key, e.target.value)}
+                        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                  ))}
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-1.5">Email</label>
+                    <input type="email" value={form.email} onChange={e => setField('email', e.target.value)}
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-gray-700 block mb-1.5">Email Address</label>
-                    <div className="relative">
-                      <Mail size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input type="email" value={form.email} onChange={e => setField('email', e.target.value)} placeholder="tunde@example.com"
-                        className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    </div>
+                    <label className="text-sm font-medium text-gray-700 block mb-1.5">Phone</label>
+                    <input type="tel" value={form.phone} onChange={e => setField('phone', e.target.value)}
+                      placeholder="+234..."
+                      className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 block mb-1.5">Phone Number</label>
-                    <div className="relative">
-                      <PhoneIcon size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input type="tel" value={form.phone} onChange={e => setField('phone', e.target.value)} placeholder="+234 803 000 0000"
-                        className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    </div>
-                  </div>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={form.updates} onChange={e => setField('updates', e.target.checked)} className="w-4 h-4 accent-blue-600 rounded" />
-                    <span className="text-sm text-gray-600">I&apos;d like to receive listing updates and market insights</span>
-                  </label>
                 </div>
-                <div className="flex gap-3 mt-6 pt-5 border-t border-gray-100">
-                  <Link href={`/listing/${property.id}`} className="px-5 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</Link>
-                  <button onClick={() => setStep(2)} className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2">
-                    Next: Schedule →
-                  </button>
-                </div>
+                <button onClick={() => setStep(2)} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl mt-2">
+                  Next: Select Date
+                </button>
               </div>
             )}
 
-            {/* Step 2 - Select date & time */}
+            {/* Step 2: Date/Time */}
             {step === 2 && (
-              <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-                <h2 className="text-lg font-bold text-gray-900 mb-1">Choose a Date &amp; Time</h2>
-                <p className="text-sm text-gray-500 mb-5">Select from available slots with {property.agent.name}.</p>
-
-                <div className="mb-5">
-                  <p className="text-xs font-semibold text-gray-600 uppercase tracking-widest mb-3">Available Dates</p>
-                  <div className="flex gap-2 overflow-x-auto pb-2">
-                    {DATES.map(d => (
-                      <button key={d.value} onClick={() => setSelectedDate(d.value)}
-                        className={`shrink-0 px-4 py-2.5 rounded-xl border text-sm font-medium transition-all ${selectedDate === d.value ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 text-gray-700 hover:border-blue-300'}`}>
-                        {d.label}
-                      </button>
-                    ))}
-                  </div>
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-5">
+                <h2 className="font-semibold text-gray-900">Pick a Date</h2>
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  {DATES.map(d => (
+                    <button key={d.value} onClick={() => setSelectedDate(d.value)}
+                      className={`py-3 px-2 rounded-xl border text-center text-sm font-medium transition-colors ${selectedDate === d.value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-700 hover:border-blue-300'}`}>
+                      {d.label}
+                    </button>
+                  ))}
                 </div>
 
-                <div>
-                  <p className="text-xs font-semibold text-gray-600 uppercase tracking-widest mb-3">Available Times</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {TIMES.map(t => (
-                      <button key={t} onClick={() => setSelectedTime(t)}
-                        className={`py-2.5 rounded-xl border text-sm font-medium transition-all ${selectedTime === t ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 text-gray-700 hover:border-blue-300'}`}>
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                {selectedDate && (
+                  <>
+                    <h2 className="font-semibold text-gray-900">Pick a Time</h2>
+                    <div className="grid grid-cols-3 gap-2">
+                      {TIMES.map(t => (
+                        <button key={t} onClick={() => setSelectedTime(t)}
+                          className={`py-2.5 rounded-xl border text-sm font-medium transition-colors ${selectedTime === t ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-700 hover:border-blue-300'}`}>
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
 
-                <div className="flex gap-3 mt-6 pt-5 border-t border-gray-100">
-                  <button onClick={() => setStep(1)} className="px-5 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Back</button>
+                <div className="flex gap-3">
+                  <button onClick={() => setStep(1)} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">
+                    Back
+                  </button>
                   <button onClick={() => setStep(3)} disabled={!selectedDate || !selectedTime}
-                    className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 text-white font-bold rounded-xl transition-colors">
-                    Confirm Booking →
+                    className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-bold rounded-xl">
+                    Review
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Step 3 - Confirmation */}
+            {/* Step 3: Confirm */}
             {step === 3 && (
-              <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm text-center">
-                <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <CheckCircle size={32} className="text-emerald-500" />
-                </div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">Booking Confirmed!</h2>
-                <p className="text-sm text-gray-500 mb-6">Your viewing has been successfully scheduled.</p>
-
-                <div className="bg-gray-50 rounded-xl p-4 mb-6 text-left">
-                  <div className="flex items-center gap-3">
-                    <div className="relative w-16 h-12 rounded-lg overflow-hidden shrink-0">
-                      <Image src={property.images[0]} alt={property.address} fill className="object-cover" />
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-900 text-sm">{property.address}</p>
-                      <p className="text-xs text-gray-500">{property.zip}, {property.city}</p>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-gray-600">
-                        <span className="flex items-center gap-1"><Calendar size={11} /> {selectedDate}</span>
-                        <span className="flex items-center gap-1"><Clock size={11} /> {selectedTime}</span>
-                      </div>
-                    </div>
+              <div className="space-y-4">
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-3">
+                  <h2 className="font-semibold text-gray-900">Confirm Your Viewing</h2>
+                  <div className="text-sm space-y-2">
+                    <div className="flex justify-between"><span className="text-gray-500">Name</span><span className="font-medium">{form.firstName} {form.lastName}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Email</span><span className="font-medium">{form.email}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Date</span><span className="font-medium">{selectedDate}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Time</span><span className="font-medium">{selectedTime}</span></div>
+                    {property && <div className="flex justify-between"><span className="text-gray-500">Property</span><span className="font-medium text-right max-w-[200px]">{property.title || property.address}</span></div>}
                   </div>
                 </div>
-
-                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl mb-6">
-                  <div className="relative w-10 h-10 rounded-full overflow-hidden shrink-0">
-                    <Image src={property.agent.photo} alt={property.agent.name} fill className="object-cover" />
-                  </div>
-                  <div className="flex-1 text-left">
-                    <p className="font-semibold text-sm text-gray-900">{property.agent.name}</p>
-                    <p className="text-xs text-gray-500">Premier Listing Agent</p>
-                  </div>
-                  <Link href="/messages" className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline">
-                    Message
-                  </Link>
+                <div className="flex gap-3">
+                  <button onClick={() => setStep(2)} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">
+                    Edit
+                  </button>
+                  <button onClick={handleConfirm} disabled={submitting}
+                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white font-bold rounded-xl flex items-center justify-center gap-2">
+                    {submitting ? <><div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin" /> Booking...</> : <><Calendar size={16} /> Confirm Viewing</>}
+                  </button>
                 </div>
-
-                <div className="mb-5">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">Sync to your calendar</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { key: 'google', label: 'Google Calendar', icon: '📅' },
-                      { key: 'apple', label: 'Apple iCal', icon: '🗓' },
-                    ].map(c => (
-                      <button key={c.key} onClick={() => setCalendarAdded(p => ({ ...p, [c.key]: true }))}
-                        className={`flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium transition-all ${calendarAdded[c.key] ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'border-gray-200 text-gray-700 hover:border-blue-300'}`}>
-                        {calendarAdded[c.key] ? <CheckCircle size={14} /> : c.icon} {calendarAdded[c.key] ? 'Added!' : c.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mb-5">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">Notification reminders</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[{ label: 'Email Updates' }, { label: 'SMS Alerts' }].map(r => (
-                      <button key={r.label} className="py-2.5 rounded-xl border border-blue-200 bg-blue-50 text-sm font-medium text-blue-700 hover:bg-blue-100 transition-colors">
-                        {r.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <Link href="/dashboard/buyer" className="block w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors mb-3">
-                  Go to Buyer Dashboard
-                </Link>
-                <Link href={`/listing/${property.id}`} className="block text-sm text-gray-500 hover:text-gray-700">
-                  Return to Listing
-                </Link>
               </div>
             )}
           </div>
 
-          {/* Property sidebar */}
-          <div className="w-full lg:w-80 shrink-0">
-            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm sticky top-24">
-              <div className="relative h-48">
-                <Image src={property.images[0]} alt={property.address} fill className="object-cover" />
-                <span className="absolute top-3 left-3 text-xs font-bold px-2.5 py-1 rounded-full bg-blue-600 text-white">Featured</span>
-              </div>
-              <div className="p-5">
-                <p className="text-xl font-bold text-gray-900 mb-0.5">{formatFullPrice(property.price)}</p>
-                <p className="text-sm text-gray-600 mb-3">{property.address}, {property.zip}, {property.city}</p>
-                <div className="flex gap-4 text-sm text-gray-700 mb-4 pb-4 border-b border-gray-100">
-                  <span>{property.beds} Beds</span>
-                  <span>{property.baths} Baths</span>
-                  <span>{property.sqft.toLocaleString()} SqFt</span>
+          {/* Property card sidebar */}
+          {property && (
+            <div className="w-full lg:w-80 shrink-0">
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden sticky top-24">
+                <div className="h-40 bg-gray-100 relative">
+                  {property.images?.[0] && (
+                    <img src={property.images[0]} alt={property.title} className="w-full h-full object-cover" />
+                  )}
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="relative w-10 h-10 rounded-full overflow-hidden shrink-0">
-                    <Image src={property.agent.photo} alt={property.agent.name} fill className="object-cover" />
+                <div className="p-4">
+                  <p className="font-bold text-lg text-gray-900">{formatFullPrice(property.price)}</p>
+                  <p className="text-sm font-medium text-gray-700 mt-0.5">{property.title || property.address}</p>
+                  <p className="text-xs text-gray-500">{property.area}, {property.city}</p>
+                  <div className="flex gap-3 text-xs text-gray-500 mt-2 pt-2 border-t border-gray-50">
+                    <span>{property.beds} bds</span>
+                    <span>{property.baths} ba</span>
+                    <span>{property.sqft.toLocaleString()} sqft</span>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm text-gray-900">{property.agent.name}</p>
-                    <p className="text-xs text-gray-500">Premier Listing Agent</p>
-                    <p className="text-xs text-emerald-600 font-medium">{property.agent.online ? 'Online Now' : 'Offline'}</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2 mt-4">
-                  <a href={`tel:${property.agent.phone}`} className="flex items-center justify-center gap-1.5 py-2 border border-gray-200 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50">
-                    Message
-                  </a>
-                  <a href={`tel:${property.agent.phone}`} className="flex items-center justify-center gap-1.5 py-2 border border-gray-200 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50">
-                    Call
-                  </a>
-                </div>
-                <div className="grid grid-cols-2 gap-2 mt-3">
-                  {[{ label: 'SECURE BOOKING' }, { label: 'VERIFIED AGENT' }].map(b => (
-                    <div key={b.label} className="flex items-center justify-center gap-1 p-2 bg-gray-50 rounded-lg">
-                      <CheckCircle size={11} className="text-blue-500" />
-                      <span className="text-[9px] font-semibold text-gray-600">{b.label}</span>
-                    </div>
-                  ))}
                 </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

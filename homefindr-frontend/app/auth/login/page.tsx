@@ -3,25 +3,57 @@
 import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, Home } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
+import toast from 'react-hot-toast';
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
 
 export default function LoginPage() {
+  const router = useRouter();
+  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError('');
     setLoading(true);
-    await new Promise(r => setTimeout(r, 1200));
-    setLoading(false);
-    window.location.href = '/dashboard/buyer';
+    try {
+      await login(email, password);
+      toast.success('Welcome back!');
+      router.push('/dashboard/buyer');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Login failed';
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleGoogle() {
+    if (!GOOGLE_CLIENT_ID) {
+      toast.error('Google login is not configured yet.');
+      return;
+    }
+    const redirectUri = `${window.location.origin}/auth/callback`;
+    const params = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid email profile',
+      access_type: 'offline',
+    });
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   }
 
   return (
     <div className="min-h-[calc(100vh-64px)] flex">
-      {/* Left – property image + quote */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
         <Image src="https://images.unsplash.com/photo-1582407947304-fd86f028f716?w=1200&q=85" alt="Luxury home" fill className="object-cover" />
         <div className="absolute inset-0 bg-gradient-to-b from-blue-900/50 to-blue-900/80" />
@@ -41,14 +73,12 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* Right – form */}
       <div className="flex-1 flex items-center justify-center px-6 py-12 bg-white">
         <div className="w-full max-w-sm">
           <h1 className="text-3xl font-bold text-gray-900 mb-1">Welcome Back</h1>
-          <p className="text-sm text-gray-500 mb-8">Enter your credentials to access your dashboard.</p>
+          <p className="text-sm text-gray-500 mb-8">Enter your credentials to access your account.</p>
 
-          {/* Google */}
-          <button className="w-full flex items-center justify-center gap-3 py-3 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors mb-5 shadow-sm">
+          <button onClick={handleGoogle} className="w-full flex items-center justify-center gap-3 py-3 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors mb-5 shadow-sm">
             <svg width="18" height="18" viewBox="0 0 18 18">
               <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
               <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/>
@@ -63,6 +93,12 @@ export default function LoginPage() {
             <span className="px-3 text-xs text-gray-400 uppercase tracking-widest">or continue with email</span>
             <div className="flex-1 border-t border-gray-200" />
           </div>
+
+          {error && (
+            <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+              {error}
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

@@ -1,154 +1,213 @@
 'use client';
 
-import { useState, use } from 'react';
+import { useState, useEffect, use } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Heart, Share2, Phone, MessageSquare, Calendar, MapPin, BedDouble, Bath, Maximize, Star, ChevronLeft, ChevronRight, CheckCircle, School, Coffee, X } from 'lucide-react';
+import { Heart, Share2, Phone, MessageSquare, Calendar, MapPin, BedDouble, Bath, Maximize, ChevronLeft, ChevronRight, CheckCircle, X } from 'lucide-react';
 import Footer from '@/components/layout/Footer';
 import PropertyCard from '@/components/features/PropertyCard';
-import { PROPERTIES } from '@/data/mock';
-import { formatPrice, formatFullPrice, formatDate, getBadgeColor, getBadgeLabel, getStatusColor } from '@/lib/utils';
+import { properties as api, messages as msgApi, type Property } from '@/lib/api';
+import { formatPrice, formatFullPrice, cn } from '@/lib/utils';
+import { useAuth } from '@/context/AuthContext';
+import { useRouter } from 'next/navigation';
+import toast from 'react-hot-toast';
 
 export default function ListingDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const property = PROPERTIES.find(p => p.id === id) ?? PROPERTIES[0];
-  const related = PROPERTIES.filter(p => p.id !== id && p.city === property.city).slice(0, 4);
+  const { user } = useAuth();
+  const router = useRouter();
 
+  const [property, setProperty] = useState<Property | null>(null);
+  const [related, setRelated] = useState<Property[]>([]);
+  const [loading, setLoading] = useState(true);
   const [imgIndex, setImgIndex] = useState(0);
   const [saved, setSaved] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
-  const [descExpanded, setDescExpanded] = useState(false);
+  const [showContact, setShowContact] = useState(false);
+  const [contactMsg, setContactMsg] = useState('');
+  const [sendingMsg, setSendingMsg] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('10:00');
 
-  function prev() { setImgIndex(i => (i - 1 + property.images.length) % property.images.length); }
-  function next() { setImgIndex(i => (i + 1) % property.images.length); }
+  useEffect(() => {
+    api.get(id).then(p => {
+      setProperty(p);
+      setSaved(p.is_saved ?? false);
+      // Fetch related
+      api.list({ city: p.city, page_size: 5 }).then(res => {
+        setRelated(res.items.filter(r => r.id !== p.id).slice(0, 4));
+      }).catch(() => {});
+    }).catch(() => toast.error('Property not found')).finally(() => setLoading(false));
+  }, [id]);
+
+  async function toggleSave() {
+    if (!user) { router.push('/auth/login'); return; }
+    try {
+      if (saved) { await api.unsave(id); setSaved(false); toast.success('Removed from saved'); }
+      else { await api.save(id); setSaved(true); toast.success('Saved!'); }
+    } catch { toast.error('Failed to update saved status'); }
+  }
+
+  async function sendContactMessage() {
+    if (!user) { router.push('/auth/login'); return; }
+    if (!contactMsg.trim() || !property?.agent) return;
+    setSendingMsg(true);
+    try {
+      await msgApi.startConversation({
+        agent_id: property.agent.id,
+        property_id: property.id,
+        first_message: contactMsg.trim(),
+      });
+      toast.success('Message sent to agent!');
+      setShowContact(false);
+      setContactMsg('');
+      router.push('/messages');
+    } catch { toast.error('Failed to send message'); }
+    finally { setSendingMsg(false); }
+  }
+
+  async function scheduleViewing() {
+    if (!user) { router.push('/auth/login'); return; }
+    if (!scheduleDate) { toast.error('Please select a date'); return; }
+    try {
+      const { viewings } = await import('@/lib/api');
+      await viewings.create({
+        property_id: id,
+        scheduled_at: new Date(`${scheduleDate}T${scheduleTime}`).toISOString(),
+        contact_name: user.full_name,
+        contact_email: user.email,
+        contact_phone: user.phone || undefined,
+      });
+      toast.success('Viewing scheduled!');
+      setShowSchedule(false);
+    } catch { toast.error('Failed to schedule viewing'); }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!property) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-center p-8">
+        <div>
+          <p className="text-xl font-bold text-gray-900 mb-2">Property not found</p>
+          <Link href="/search" className="text-blue-600 hover:underline text-sm">Browse all listings</Link>
+        </div>
+      </div>
+    );
+  }
+
+  const images = property.images?.length > 0 ? property.images : ['https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&q=80'];
+
+  function prev() { setImgIndex(i => (i - 1 + images.length) % images.length); }
+  function next() { setImgIndex(i => (i + 1) % images.length); }
 
   return (
     <div className="flex flex-col">
-      {/* ── IMAGE GALLERY ─────────────────────────────────────── */}
+      {/* Gallery */}
       <section className="relative bg-black h-[420px] md:h-[560px]">
-        <Image src={property.images[imgIndex]} alt={property.address} fill className="object-cover opacity-90" priority />
+        <Image src={images[imgIndex]} alt={property.title} fill className="object-cover opacity-90" priority />
 
-        {/* Nav arrows */}
-        <button onClick={prev} className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/60 hover:bg-black/80 text-white rounded-full flex items-center justify-center transition-colors z-10">
-          <ChevronLeft size={20} />
-        </button>
-        <button onClick={next} className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/60 hover:bg-black/80 text-white rounded-full flex items-center justify-center transition-colors z-10">
-          <ChevronRight size={20} />
-        </button>
-
-        {/* Badge */}
-        {property.badge && (
-          <span className={`absolute top-4 left-4 text-xs font-bold px-3 py-1.5 rounded-full z-10 ${getBadgeColor(property.badge)}`}>
-            {getBadgeLabel(property.badge)}
-          </span>
+        {images.length > 1 && (
+          <>
+            <button onClick={prev} className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/60 hover:bg-black/80 text-white rounded-full flex items-center justify-center z-10">
+              <ChevronLeft size={20} />
+            </button>
+            <button onClick={next} className="absolute right-14 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/60 hover:bg-black/80 text-white rounded-full flex items-center justify-center z-10">
+              <ChevronRight size={20} />
+            </button>
+          </>
         )}
 
-        {/* Thumbnails */}
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 z-10">
-          {property.images.map((img, i) => (
-            <button key={i} onClick={() => setImgIndex(i)}
-              className={`w-14 h-10 rounded-lg overflow-hidden border-2 transition-all ${i === imgIndex ? 'border-white scale-110' : 'border-white/40'}`}>
-              <Image src={img} alt="" width={56} height={40} className="object-cover w-full h-full" />
-            </button>
-          ))}
+        {images.length > 1 && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 z-10">
+            {images.slice(0, 6).map((img, i) => (
+              <button key={i} onClick={() => setImgIndex(i)}
+                className={`w-14 h-10 rounded-lg overflow-hidden border-2 transition-all ${i === imgIndex ? 'border-white scale-110' : 'border-white/40'}`}>
+                <Image src={img} alt="" width={56} height={40} className="object-cover w-full h-full" />
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="absolute top-4 right-4 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full z-10">
+          {imgIndex + 1} / {images.length}
         </div>
 
-        {/* Photo count */}
-        <div className="absolute top-4 right-4 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full z-10">
-          {imgIndex + 1} / {property.images.length}
-        </div>
+        <span className={cn('absolute top-4 left-4 text-xs font-bold px-3 py-1.5 rounded-full z-10 capitalize',
+          property.status === 'active' ? 'bg-emerald-500 text-white' : 'bg-gray-500 text-white')}>
+          {property.status}
+        </span>
       </section>
 
-      {/* ── STICKY CTA STRIP ────────────────────────────────── */}
-      <div className="sticky-cta px-4 py-3 hidden md:block">
+      {/* Sticky CTA */}
+      <div className="sticky top-16 z-30 bg-white border-b border-gray-200 px-4 py-3 hidden md:block shadow-sm">
         <div className="max-w-[1440px] mx-auto flex items-center justify-between gap-4">
           <div>
             <span className="text-2xl font-bold text-gray-900">{formatFullPrice(property.price)}</span>
-            {property.originalPrice && <span className="ml-3 text-sm text-gray-400 line-through">{formatFullPrice(property.originalPrice)}</span>}
-            <span className={`ml-3 text-xs font-semibold px-2 py-0.5 rounded-full ${getStatusColor(property.status)}`}>
-              {property.status.toUpperCase()}
-            </span>
+            <span className="ml-3 text-xs font-semibold px-2 py-0.5 rounded-full text-emerald-700 bg-emerald-50 capitalize">{property.status}</span>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setSaved(s => !s)} className={`flex items-center gap-1.5 px-4 py-2 border rounded-lg text-sm font-medium transition-all ${saved ? 'border-red-300 text-red-600 bg-red-50' : 'border-gray-200 text-gray-700 hover:border-red-300 hover:text-red-600'}`}>
+            <button onClick={toggleSave} className={cn('flex items-center gap-1.5 px-4 py-2 border rounded-lg text-sm font-medium transition-all',
+              saved ? 'border-red-300 text-red-600 bg-red-50' : 'border-gray-200 text-gray-700 hover:border-red-300 hover:text-red-600')}>
               <Heart size={15} fill={saved ? 'currentColor' : 'none'} /> Save
             </button>
-            <button className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
+            <button onClick={() => { navigator.share?.({ title: property.title, url: window.location.href }); }} className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
               <Share2 size={15} /> Share
             </button>
-            <a href={`tel:${property.agent.phone}`} className="flex items-center gap-1.5 px-4 py-2 border border-blue-200 bg-blue-50 rounded-lg text-sm font-medium text-blue-700 hover:bg-blue-100">
-              <Phone size={15} /> Call Agent
-            </a>
-            <button onClick={() => setShowSchedule(true)} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-semibold text-white transition-colors">
-              <Calendar size={15} /> Schedule Visit
+            {property.agent?.phone && (
+              <a href={`tel:${property.agent.phone}`} className="flex items-center gap-1.5 px-4 py-2 border border-blue-200 bg-blue-50 rounded-lg text-sm font-medium text-blue-700 hover:bg-blue-100">
+                <Phone size={15} /> Call Agent
+              </a>
+            )}
+            <button onClick={() => setShowContact(true)} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors">
+              <MessageSquare size={15} /> Message Agent
+            </button>
+            <button onClick={() => setShowSchedule(true)} className="flex items-center gap-1.5 px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-sm font-semibold transition-colors">
+              <Calendar size={15} /> Schedule Viewing
             </button>
           </div>
         </div>
       </div>
 
-      {/* ── MAIN CONTENT ─────────────────────────────────────── */}
-      <div className="max-w-[1440px] mx-auto w-full px-4 py-8">
-        <div className="flex flex-col lg:flex-row gap-8">
-          {/* Left column */}
-          <div className="flex-1 min-w-0 space-y-8">
-            {/* Headline */}
-            <div>
-              <div className="flex flex-wrap items-start gap-2 mb-2">
-                <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex-1">{property.address}, {property.zip}</h1>
-                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full shrink-0 ${getStatusColor(property.status)}`}>
-                  {property.status.toUpperCase()}
-                </span>
-              </div>
-              <p className="text-gray-500 text-sm flex items-center gap-1 mb-3">
-                <MapPin size={14} /> {property.city}, {property.state}
-              </p>
-              <div className="flex flex-wrap gap-4 text-sm text-gray-700">
-                <span className="flex items-center gap-1.5 font-medium"><BedDouble size={16} className="text-blue-500" />{property.beds} Bedrooms</span>
-                <span className="flex items-center gap-1.5 font-medium"><Bath size={16} className="text-blue-500" />{property.baths} Bathrooms</span>
-                <span className="flex items-center gap-1.5 font-medium"><Maximize size={16} className="text-blue-500" />{property.sqft.toLocaleString()} sqft</span>
-                {property.lotSize && <span className="flex items-center gap-1.5 font-medium">🏡 {property.lotSize} acres lot</span>}
-                {property.yearBuilt && <span className="flex items-center gap-1.5 font-medium">📅 Built {property.yearBuilt}</span>}
-              </div>
+      {/* Main content */}
+      <div className="max-w-[1440px] mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-3 gap-8 w-full">
+        <div className="lg:col-span-2 space-y-8">
+          {/* Header */}
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">{property.title}</h1>
+            <p className="text-gray-500 flex items-center gap-1.5">
+              <MapPin size={15} className="text-blue-500" />
+              {property.address}, {property.area}, {property.city}, {property.state}
+            </p>
+
+            <div className="flex flex-wrap gap-4 mt-4">
+              <span className="flex items-center gap-1.5 text-sm text-gray-700"><BedDouble size={16} className="text-blue-500" />{property.beds} Bedrooms</span>
+              <span className="flex items-center gap-1.5 text-sm text-gray-700"><Bath size={16} className="text-blue-500" />{property.baths} Bathrooms</span>
+              <span className="flex items-center gap-1.5 text-sm text-gray-700"><Maximize size={16} className="text-blue-500" />{property.sqft.toLocaleString()} sqft</span>
+              {property.year_built && <span className="text-sm text-gray-500">Built {property.year_built}</span>}
+              {property.lot_size && <span className="text-sm text-gray-500">{property.lot_size} acres lot</span>}
             </div>
+          </div>
 
-            {/* Price history */}
-            {property.priceHistory.length > 1 && (
-              <div>
-                <h2 className="text-lg font-bold text-gray-900 mb-3">Price History</h2>
-                <div className="space-y-2">
-                  {property.priceHistory.map((h, i) => (
-                    <div key={i} className="flex items-center justify-between py-2 border-b border-gray-100 text-sm">
-                      <span className="text-gray-500">{formatDate(h.date)}</span>
-                      <span className="text-gray-600">{h.event}</span>
-                      <span className="font-semibold text-gray-900">{formatFullPrice(h.price)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Description */}
-            <div>
-              <h2 className="text-lg font-bold text-gray-900 mb-3">About this Property</h2>
-              <div className="flex flex-wrap gap-2 mb-3">
-                {property.highlights.map(h => (
-                  <span key={h} className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 bg-blue-50 text-blue-700 rounded-full">
-                    <CheckCircle size={11} /> {h}
-                  </span>
-                ))}
-              </div>
-              <p className={`text-sm text-gray-600 leading-relaxed ${!descExpanded ? 'line-clamp-3' : ''}`}>
-                {property.description}
-              </p>
-              <button onClick={() => setDescExpanded(d => !d)} className="text-sm font-semibold text-blue-600 hover:underline mt-2">
-                {descExpanded ? 'Show less' : 'Read more'}
-              </button>
+          {/* Description */}
+          {property.description && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+              <h2 className="text-lg font-bold text-gray-900 mb-3">About this property</h2>
+              <p className="text-sm text-gray-700 leading-relaxed">{property.description}</p>
             </div>
+          )}
 
-            {/* Amenities */}
-            <div>
-              <h2 className="text-lg font-bold text-gray-900 mb-3">Features &amp; Amenities</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {/* Amenities */}
+          {property.amenities?.length > 0 && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+              <h2 className="text-lg font-bold text-gray-900 mb-4">Amenities</h2>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                 {property.amenities.map(a => (
                   <div key={a} className="flex items-center gap-2 text-sm text-gray-700">
                     <CheckCircle size={14} className="text-blue-500 shrink-0" /> {a}
@@ -156,180 +215,141 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
                 ))}
               </div>
             </div>
+          )}
 
-            {/* Map placeholder */}
-            <div>
-              <h2 className="text-lg font-bold text-gray-900 mb-3">Location</h2>
-              <div className="rounded-xl overflow-hidden h-64 bg-gray-100 relative border border-gray-200">
-                <Image src={`https://maps.geoapify.com/v1/staticmap?style=osm-carto&width=800&height=400&center=lonlat:${property.lng},${property.lat}&zoom=14&marker=lonlat:${property.lng},${property.lat};color:%232563eb;size:large&apiKey=YOUR_KEY`}
-                  alt="Map location"
-                  fill
-                  className="object-cover"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1569336415962-a4bd9f69cd83?w=800&q=70';
-                  }}
-                />
-                <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/10 flex items-end p-3">
-                  <p className="text-xs text-white bg-black/50 px-2 py-1 rounded">{property.address}, {property.city}</p>
-                </div>
+          {/* Location */}
+          {(property.latitude && property.longitude) && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+              <h2 className="text-lg font-bold text-gray-900 mb-4">Location</h2>
+              <div className="h-48 bg-gray-100 rounded-xl flex items-center justify-center text-gray-400 text-sm">
+                <MapPin size={20} className="mr-2" />
+                {property.area}, {property.city} — {property.latitude.toFixed(4)}, {property.longitude.toFixed(4)}
               </div>
             </div>
+          )}
+        </div>
 
-            {/* Schools */}
-            {property.schools && (
-              <div>
-                <h2 className="text-lg font-bold text-gray-900 mb-3">Nearby Schools</h2>
-                <div className="space-y-2">
-                  {property.schools.map(s => (
-                    <div key={s.name} className="flex items-center justify-between p-3 border border-gray-100 rounded-xl hover:bg-gray-50 transition-colors">
-                      <div className="flex items-center gap-2.5">
-                        <School size={16} className="text-blue-500 shrink-0" />
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{s.name}</p>
-                          <p className="text-xs text-gray-500">{s.type} · {s.distance}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Star size={12} className="fill-amber-400 text-amber-400" />
-                        <span className="text-xs font-semibold text-gray-700">{s.rating}/10</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+        {/* Sidebar */}
+        <div className="space-y-5">
+          {/* Price card */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+            <p className="text-3xl font-bold text-gray-900 mb-1">{formatFullPrice(property.price)}</p>
+            <p className="text-xs text-gray-500 mb-5">₦{Math.round(property.price / property.sqft).toLocaleString()} / sqft</p>
 
-            {/* Nearby amenities */}
-            {property.nearbyAmenities && (
-              <div>
-                <h2 className="text-lg font-bold text-gray-900 mb-3">Nearby Amenities</h2>
-                <div className="grid grid-cols-2 gap-2">
-                  {property.nearbyAmenities.map(a => (
-                    <div key={a.name} className="flex items-center gap-2 p-3 border border-gray-100 rounded-xl">
-                      <Coffee size={15} className="text-blue-500 shrink-0" />
-                      <div>
-                        <p className="text-xs font-medium text-gray-900">{a.name}</p>
-                        <p className="text-xs text-gray-500">{a.type} · {a.distance}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <div className="space-y-2">
+              <button onClick={() => setShowSchedule(true)} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors">
+                <Calendar size={16} /> Schedule Viewing
+              </button>
+              <button onClick={() => setShowContact(true)} className="w-full py-3 border border-blue-200 text-blue-700 hover:bg-blue-50 font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors">
+                <MessageSquare size={16} /> Message Agent
+              </button>
+              <button onClick={toggleSave} className={cn('w-full py-3 border rounded-xl font-semibold flex items-center justify-center gap-2 transition-all',
+                saved ? 'border-red-200 text-red-600 bg-red-50' : 'border-gray-200 text-gray-700 hover:bg-gray-50')}>
+                <Heart size={16} fill={saved ? 'currentColor' : 'none'} /> {saved ? 'Saved' : 'Save'}
+              </button>
+            </div>
           </div>
 
-          {/* Right sticky column */}
-          <div className="w-full lg:w-80 xl:w-96 shrink-0 space-y-4">
-            {/* Price card */}
-            <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-card sticky top-24">
-              <p className="text-2xl font-bold text-gray-900 mb-0.5">{formatFullPrice(property.price)}</p>
-              {property.originalPrice && <p className="text-sm text-gray-400 line-through mb-1">{formatFullPrice(property.originalPrice)}</p>}
-              <p className="text-xs text-gray-500 mb-4 flex items-center gap-1"><MapPin size={11} /> {property.zip}, {property.city}, {property.state}</p>
-
-              <div className="grid grid-cols-3 gap-2 py-3 border-y border-gray-100 mb-4 text-center">
-                <div><p className="text-base font-bold text-gray-900">{property.beds}</p><p className="text-xs text-gray-500">Beds</p></div>
-                <div><p className="text-base font-bold text-gray-900">{property.baths}</p><p className="text-xs text-gray-500">Baths</p></div>
-                <div><p className="text-base font-bold text-gray-900">{(property.sqft / 1000).toFixed(1)}k</p><p className="text-xs text-gray-500">sqft</p></div>
-              </div>
-
-              <button onClick={() => setShowSchedule(true)} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl mb-3 transition-colors">
-                Schedule a Viewing
-              </button>
-              <Link href={`/offers?propertyId=${property.id}`} className="block w-full py-3 border border-blue-200 text-blue-700 font-semibold rounded-xl text-center hover:bg-blue-50 transition-colors mb-3 text-sm">
-                Make an Offer
-              </Link>
-              <div className="flex gap-2">
-                <a href={`tel:${property.agent.phone}`} className="flex-1 py-2 border border-gray-200 text-gray-700 font-medium rounded-xl text-center text-sm hover:bg-gray-50 transition-colors flex items-center justify-center gap-1">
-                  <Phone size={13} /> Call
-                </a>
-                <Link href="/messages" className="flex-1 py-2 border border-gray-200 text-gray-700 font-medium rounded-xl text-center text-sm hover:bg-gray-50 transition-colors flex items-center justify-center gap-1">
-                  <MessageSquare size={13} /> Message
-                </Link>
-              </div>
-
-              {/* Agent card */}
-              <div className="mt-4 pt-4 border-t border-gray-100">
-                <div className="flex items-start gap-3">
-                  <div className="relative w-12 h-12 rounded-full overflow-hidden shrink-0">
-                    <Image src={property.agent.photo} alt={property.agent.name} fill className="object-cover" />
-                    {property.agent.online && <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm text-gray-900">{property.agent.name}</p>
-                    <p className="text-xs text-gray-500">{property.agent.title}</p>
-                    <div className="flex items-center gap-1 mt-1">
-                      <Star size={11} className="fill-amber-400 text-amber-400" />
-                      <span className="text-xs font-semibold text-gray-700">{property.agent.rating}</span>
-                      <span className="text-xs text-gray-400">({property.agent.reviews} reviews)</span>
-                    </div>
-                  </div>
+          {/* Agent card */}
+          {property.agent && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Listed by</p>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold shrink-0">
+                  {property.agent.full_name.split(' ').map(w => w[0]).join('').slice(0, 2)}
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-900">{property.agent.full_name}</p>
+                  {property.agent.is_verified && (
+                    <p className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle size={11} /> Verified Agent</p>
+                  )}
                 </div>
               </div>
+              {property.agent.phone && (
+                <a href={`tel:${property.agent.phone}`} className="w-full flex items-center justify-center gap-2 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">
+                  <Phone size={14} /> {property.agent.phone}
+                </a>
+              )}
+            </div>
+          )}
 
-              {/* Trust badges */}
-              <div className="grid grid-cols-2 gap-2 mt-4">
-                {[{ label: 'SECURE BOOKING' }, { label: 'VERIFIED AGENT' }].map(b => (
-                  <div key={b.label} className="flex items-center justify-center gap-1.5 p-2 border border-gray-100 rounded-lg">
-                    <CheckCircle size={13} className="text-blue-500" />
-                    <span className="text-[10px] font-semibold text-gray-600">{b.label}</span>
-                  </div>
-                ))}
-              </div>
+          {/* Details summary */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
+            <p className="font-semibold text-gray-900 mb-3">Property Details</p>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="font-medium">{property.property_type}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Status</span><span className="font-medium capitalize">{property.status}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Beds</span><span className="font-medium">{property.beds}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Baths</span><span className="font-medium">{property.baths}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Size</span><span className="font-medium">{property.sqft.toLocaleString()} sqft</span></div>
+              {property.year_built && <div className="flex justify-between"><span className="text-gray-500">Year Built</span><span className="font-medium">{property.year_built}</span></div>}
+              <div className="flex justify-between"><span className="text-gray-500">Commission</span><span className="font-medium">{property.commission_pct}%</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Views</span><span className="font-medium">{property.views}</span></div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── OPEN HOUSES ─────────────────────────────────────── */}
-      {property.openHouses && property.openHouses.length > 0 && (
-        <section className="bg-blue-50 py-8">
-          <div className="max-w-[1440px] mx-auto px-4">
-            <h2 className="text-lg font-bold text-gray-900 mb-4">Upcoming Open Houses</h2>
-            <div className="flex flex-wrap gap-3">
-              {property.openHouses.map((oh, i) => (
-                <div key={i} className="bg-white rounded-xl px-5 py-4 shadow-sm border border-gray-100 flex items-center gap-4">
-                  <Calendar size={20} className="text-blue-600 shrink-0" />
-                  <div>
-                    <p className="font-semibold text-gray-900 text-sm">{formatDate(oh.date)}</p>
-                    <p className="text-xs text-gray-500">{oh.startTime} – {oh.endTime}</p>
-                  </div>
-                  <button onClick={() => setShowSchedule(true)} className="ml-4 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors">
-                    RSVP
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ── SIMILAR LISTINGS ─────────────────────────────── */}
+      {/* Related */}
       {related.length > 0 && (
-        <section className="py-14">
-          <div className="max-w-[1440px] mx-auto px-4">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Similar Properties in {property.city}</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-              {related.map(p => <PropertyCard key={p.id} property={p} />)}
-            </div>
+        <section className="max-w-[1440px] mx-auto px-4 py-8 w-full">
+          <h2 className="text-xl font-bold text-gray-900 mb-5">Similar Properties in {property.city}</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {related.map(p => <PropertyCard key={p.id} property={p} />)}
           </div>
         </section>
       )}
 
       <Footer />
 
-      {/* ── SCHEDULE MODAL ────────────────────────────────── */}
+      {/* Schedule Viewing Modal */}
       {showSchedule && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowSchedule(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 animate-fade-in">
-            <button onClick={() => setShowSchedule(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
-              <X size={20} />
-            </button>
-            <h2 className="text-xl font-bold text-gray-900 mb-1">Schedule a Viewing</h2>
-            <p className="text-sm text-gray-500 mb-5">Choose a convenient time to view {property.address}.</p>
-            <Link href={`/schedule/${property.id}`} className="block w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-center transition-colors">
-              Continue to Booking
-            </Link>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold text-gray-900">Schedule a Viewing</h3>
+              <button onClick={() => setShowSchedule(false)} className="p-1 text-gray-400 hover:text-gray-600"><X size={18} /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1.5">Date</label>
+                <input type="date" value={scheduleDate} onChange={e => setScheduleDate(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1.5">Time</label>
+                <input type="time" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <button onClick={scheduleViewing} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors">
+                Confirm Viewing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Message Agent Modal */}
+      {showContact && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold text-gray-900">Contact Agent</h3>
+              <button onClick={() => setShowContact(false)} className="p-1 text-gray-400 hover:text-gray-600"><X size={18} /></button>
+            </div>
+            <div className="space-y-4">
+              <p className="text-sm text-gray-500">
+                About: <strong>{property.title}</strong> · {formatPrice(property.price)}
+              </p>
+              <textarea value={contactMsg} onChange={e => setContactMsg(e.target.value)}
+                rows={4} placeholder="Hi, I'm interested in this property and would like more information..."
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              <button onClick={sendContactMessage} disabled={sendingMsg || !contactMsg.trim()}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2">
+                {sendingMsg ? <><div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin" /> Sending...</> : 'Send Message'}
+              </button>
+            </div>
           </div>
         </div>
       )}
