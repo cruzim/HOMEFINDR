@@ -136,6 +136,7 @@ export interface Property {
     photo_url?: string;
     phone?: string;
     email: string;
+    is_verified?: boolean;  // ← added this
   };
   is_saved?: boolean;
   created_at: string;
