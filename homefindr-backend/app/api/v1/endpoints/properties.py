@@ -176,10 +176,10 @@ async def my_saved_properties(
 
 @router.get("/my-listings", response_model=PropertyListOut)
 async def my_listings(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
     current_user: AgentOrAdmin,
     db: AsyncSession = Depends(get_db),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
 ) -> PropertyListOut:
     """Return all listings created by the authenticated agent (or all for admin)."""
     if current_user.role == UserRole.admin:

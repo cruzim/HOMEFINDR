@@ -19,7 +19,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (!loading && !user) { router.push('/auth/login'); return; }
-    if (!loading && user && user.role !== 'admin' && user.role !== 'manager') {
+    if (!loading && user && user.role !== 'admin') {
       router.push('/dashboard/buyer'); return;
     }
     if (user) {
@@ -34,7 +34,7 @@ export default function AdminDashboard() {
   const active = allListings.filter(p => p.status === 'active').length;
   const pending = allListings.filter(p => p.status === 'pending').length;
   const sold = allListings.filter(p => p.status === 'sold').length;
-  const totalViews = allListings.reduce((sum, p) => sum + (p.views || 0), 0);
+  const totalViews = allListings.reduce((sum, p) => sum + ((p as any).views || 0), 0);
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -122,7 +122,7 @@ export default function AdminDashboard() {
                               {p.status}
                             </span>
                           </td>
-                          <td className="px-4 py-3 hidden lg:table-cell text-gray-500">{p.views || 0}</td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-gray-500">{(p as any).views || 0}</td>
                           <td className="px-4 py-3 hidden lg:table-cell text-gray-500">{formatDate(p.created_at)}</td>
                           <td className="px-4 py-3">
                             <Link href={`/listing/${p.id}`} className="text-xs text-blue-600 hover:underline font-medium">
