@@ -1,10 +1,5 @@
 """
 HomeFindr Backend — FastAPI application factory.
-
-Architecture:
-  FastAPI app          → REST API  (/api/v1/*)
-  Socket.IO ASGI app   → Real-time messaging (/socket.io/*)
-  Both are composed into a single ASGI app via Starlette routing.
 """
 import time
 from contextlib import asynccontextmanager
@@ -21,45 +16,32 @@ from app.db.session import init_db
 from app.services.socketio_app import socket_app
 from app.schemas.schemas import HealthCheck
 
-
 # ── Lifespan ──────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown hooks."""
-    # In development — auto-create tables.
-    # In production — Alembic migrations handle schema changes.
     if settings.is_development:
         await init_db()
     yield
-    # Nothing to tear down — connection pools close automatically.
-
 
 # ── FastAPI instance ──────────────────────────────────────────────────
 
 app = FastAPI(
     title="HomeFindr API",
-    description=(
-        "Nigeria's premier real estate platform API. "
-        "Covers property search, listings, offers, payments, "
-        "messaging, and scheduling across Lagos, Abuja, "
-        "Port Harcourt, Benin City, and Jos."
-    ),
+    description="Nigeria's premier real estate platform API.",
     version="1.0.0",
     docs_url="/api/docs" if not settings.is_production else None,
     redoc_url="/api/redoc" if not settings.is_production else None,
-    # FIXED: Added the missing comma after openapi_url
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    openapi_url=f"{settings.API_V1_STR}/openapi.json", # Uses the fixed setting
     lifespan=lifespan,
 )
 
 # ── Middleware ────────────────────────────────────────────────────────
 
-# We explicitly define the allowed origins here to fix CORS issues
 origins = [
     "http://localhost:3000",
     "https://homefindr.vercel.app",
-    "https://homefindr-frontend.vercel.app", # Added variation just in case
+    "https://homefindr-frontend.vercel.app",
 ]
 
 app.add_middleware(
@@ -70,15 +52,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
-    """Attach X-Process-Time header to every response."""
     start = time.perf_counter()
     response = await call_next(request)
     response.headers["X-Process-Time"] = f"{(time.perf_counter() - start) * 1000:.2f}ms"
     return response
-
 
 # ── Global exception handlers ─────────────────────────────────────────
 
@@ -89,7 +68,6 @@ async def not_found_handler(request: Request, exc):
         content={"detail": "Resource not found"},
     )
 
-
 @app.exception_handler(500)
 async def internal_error_handler(request: Request, exc):
     return JSONResponse(
@@ -97,22 +75,17 @@ async def internal_error_handler(request: Request, exc):
         content={"detail": "Internal server error — our team has been notified"},
     )
 
-
 # ── Routes ────────────────────────────────────────────────────────────
 
-# Ensure settings.API_V1_STR is "/api/v1"
 app.include_router(api_router, prefix=settings.API_V1_STR)
-
 
 @app.get("/health", response_model=HealthCheck, tags=["health"])
 async def health_check() -> HealthCheck:
-    """Liveness probe for Railway/Render health checks."""
     return HealthCheck(
         status="ok",
         version="1.0.0",
         environment=settings.APP_ENV,
     )
-
 
 @app.get("/", tags=["root"])
 async def root() -> dict:
@@ -123,10 +96,8 @@ async def root() -> dict:
         "health": "/health",
     }
 
+# ── ASGI composition ──────────────────────────────────────────────────
 
-# ── ASGI composition — mount Socket.IO alongside FastAPI ─────────────
-
-# IMPORTANT: In Railway, your start command must point to 'combined_app'
 combined_app = Starlette(
     routes=[
         Mount("/socket.io", app=socket_app),

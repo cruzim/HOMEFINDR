@@ -20,11 +20,15 @@ class Settings(BaseSettings):
     APP_NAME: str = "HomeFindr"
     APP_ENV: str = "development"
     DEBUG: bool = False
-    API_V1_PREFIX: str = "/api/v1"
+    
+    # FIXED: Added API_V1_STR to match main.py usage
+    API_V1_STR: str = "/api/v1"
+    API_V1_PREFIX: str = "/api/v1" 
+    
     FRONTEND_URL: str = "http://localhost:3000"
     ALLOWED_ORIGINS: Union[List[str], str] = ["http://localhost:3000"]
 
-    @field_validator("ALLOWED_ORIGINS", mode="before")  # ← indented inside class
+    @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
     def parse_origins(cls, v):
         if isinstance(v, str):
@@ -39,8 +43,6 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
-
-    # ... rest of your fields
 
     # ── Redis ─────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
