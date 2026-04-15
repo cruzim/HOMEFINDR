@@ -24,21 +24,23 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
     ALLOWED_ORIGINS: Union[List[str], str] = ["http://localhost:3000"]
 
-@field_validator("ALLOWED_ORIGINS", mode="before")
-@classmethod
-def parse_origins(cls, v):
-    if isinstance(v, str):
-        v = v.strip()
-        if v.startswith("["):
-            import json
-            return json.loads(v)
-        return [o.strip() for o in v.split(",") if o.strip()]
-    return v
+    @field_validator("ALLOWED_ORIGINS", mode="before")  # ← indented inside class
+    @classmethod
+    def parse_origins(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("["):
+                import json
+                return json.loads(v)
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
 
     # ── Database ──────────────────────────────────────────────────────
     DATABASE_URL: str
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
+
+    # ... rest of your fields
 
     # ── Redis ─────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
