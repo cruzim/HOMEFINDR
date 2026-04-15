@@ -12,7 +12,9 @@ from starlette.applications import Starlette
 
 from app.core.config import settings
 from app.api.v1.router import api_router
-from app.db.session import init_db
+# UPDATED: Import engine and Base to handle table creation
+from app.db.session import init_db, engine
+from app.models.models import Base 
 from app.services.socketio_app import socket_app
 from app.schemas.schemas import HealthCheck
 
@@ -20,6 +22,13 @@ from app.schemas.schemas import HealthCheck
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # UPDATED: We force table creation here to ensure "users" table exists
+    # This runs every time the app starts, but create_all is safe: 
+    # it won't overwrite existing data.
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    
+    # Keep your existing logic for development-specific seeding if needed
     if settings.is_development:
         await init_db()
     yield
@@ -32,7 +41,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/api/docs" if not settings.is_production else None,
     redoc_url="/api/redoc" if not settings.is_production else None,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json", # Uses the fixed setting
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan,
 )
 
@@ -70,6 +79,7 @@ async def not_found_handler(request: Request, exc):
 
 @app.exception_handler(500)
 async def internal_error_handler(request: Request, exc):
+    # Helpful for debugging: logging the error can help identify DB issues
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "Internal server error — our team has been notified"},
