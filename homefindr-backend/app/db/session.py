@@ -3,6 +3,9 @@ Async SQLAlchemy engine, session factory, and base model.
 Uses asyncpg driver for PostgreSQL.
 """
 from typing import AsyncGenerator
+import uuid
+from datetime import datetime
+
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -10,11 +13,14 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import DateTime, func
-import uuid
-from datetime import datetime
 
 from app.core.config import settings
 
+# --- CRITICAL FIX: IMPORT MODELS ---
+# Importing the models here ensures that when Base.metadata.create_all is called,
+# the 'users' table (and any others) are actually found and created.
+import app.models.models  # noqa: F401
+# -----------------------------------
 
 engine = create_async_engine(
     settings.DATABASE_URL,
@@ -70,4 +76,5 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     """Create all tables on startup (dev/test only; use Alembic in prod)."""
     async with engine.begin() as conn:
+        # Now that models are imported above, this will find the 'users' table
         await conn.run_sync(Base.metadata.create_all)
