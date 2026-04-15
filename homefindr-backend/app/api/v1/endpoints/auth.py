@@ -183,6 +183,10 @@ async def get_me(current_user: CurrentUser) -> User:
     """Return the authenticated user's profile."""
     return current_user
 
+@router.get("/google/callback")
+async def google_callback(code: str, db: AsyncSession = Depends(get_db)):
+    # Your logic to exchange the code for a token and save the user
+    pass
 
 @router.post("/logout", response_model=MessageResponse)
 async def logout() -> MessageResponse:

@@ -15,7 +15,8 @@ from app.api.v1.endpoints.admin import router as admin_router
 
 api_router = APIRouter()
 
-api_router.include_router(auth_router)
+# api_router.include_router(auth_router)
+api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(properties_router)
 api_router.include_router(offers_router)
 api_router.include_router(payments_router)

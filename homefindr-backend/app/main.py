@@ -48,23 +48,23 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/api/docs" if not settings.is_production else None,
     redoc_url="/api/redoc" if not settings.is_production else None,
-    # openapi_url="/api/openapi.json",
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    # FIXED: Added the missing comma after openapi_url
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan,
 )
-# Set all CORS enabled origins
-# We include localhost for dev and your Vercel URL for production
-origins = [
-    "http://localhost:3000",
-    "https://homefindr.vercel.app",
-]
-
 
 # ── Middleware ────────────────────────────────────────────────────────
 
+# We explicitly define the allowed origins here to fix CORS issues
+origins = [
+    "http://localhost:3000",
+    "https://homefindr.vercel.app",
+    "https://homefindr-frontend.vercel.app", # Added variation just in case
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -100,7 +100,8 @@ async def internal_error_handler(request: Request, exc):
 
 # ── Routes ────────────────────────────────────────────────────────────
 
-app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+# Ensure settings.API_V1_STR is "/api/v1"
+app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
 @app.get("/health", response_model=HealthCheck, tags=["health"])
@@ -125,7 +126,7 @@ async def root() -> dict:
 
 # ── ASGI composition — mount Socket.IO alongside FastAPI ─────────────
 
-# This allows a single Railway/Render deployment to serve both REST and WS.
+# IMPORTANT: In Railway, your start command must point to 'combined_app'
 combined_app = Starlette(
     routes=[
         Mount("/socket.io", app=socket_app),
