@@ -14,7 +14,7 @@ from app.schemas.schemas import (
 )
 from app.api.v1.deps import AdminOnly, CurrentUser
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter()
 
 
 # ── Profile ───────────────────────────────────────────────────────────

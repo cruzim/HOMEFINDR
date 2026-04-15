@@ -11,7 +11,7 @@ from PIL import Image as PilImage
 from app.core.config import settings
 from app.api.v1.deps import CurrentUser, AgentOrAdmin
 
-router = APIRouter(prefix="/media", tags=["media"])
+router = APIRouter()
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_SIZE_BYTES = 10 * 1024 * 1024   # 10 MB

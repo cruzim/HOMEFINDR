@@ -12,7 +12,7 @@ from app.models.models import Property, User, UserRole, Viewing, ViewingStatus
 from app.schemas.schemas import MessageResponse, ViewingCreate, ViewingOut, ViewingUpdate
 from app.api.v1.deps import CurrentUser
 
-router = APIRouter(prefix="/viewings", tags=["viewings"])
+router = APIRouter()
 
 
 @router.post("", response_model=ViewingOut, status_code=status.HTTP_201_CREATED)

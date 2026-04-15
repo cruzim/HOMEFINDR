@@ -13,7 +13,7 @@ from app.models.models import (
 from app.schemas.schemas import MessageResponse, PropertyOut
 from app.api.v1.deps import AdminOnly
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter()
 
 
 @router.get("/stats")

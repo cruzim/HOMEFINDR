@@ -38,7 +38,7 @@ function SearchContent() {
       const res = await api.list(f);
       setResults(res.items);
       setTotal(res.total);
-      setPages(res.pages);
+      setPages(res.total_pages);
       setPage(res.page);
     } catch { setResults([]); }
     finally { setLoading(false); }

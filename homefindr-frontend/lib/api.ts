@@ -72,7 +72,7 @@ export interface User {
   full_name: string;
   phone?: string;
   photo_url?: string;
-  role: 'buyer' | 'agent' | 'manager' | 'admin';
+  role: 'buyer' | 'agent' | 'admin';
   is_active: boolean;
   is_verified: boolean;
   created_at: string;
@@ -114,6 +114,7 @@ export interface Property {
   latitude?: number;
   longitude?: number;
   price: number;
+  original_price?: number;
   property_type: string;
   beds: number;
   baths: number;
@@ -128,15 +129,18 @@ export interface Property {
   video_url?: string;
   open_houses: Array<{ date: string; start: string; end: string }>;
   status: string;
-  views: number;
-  saves: number;
+  is_featured: boolean;
+  has_virtual_tour: boolean;
+  view_count: number;
+  save_count: number;
+  days_on_market: number;
   agent?: {
     id: string;
     full_name: string;
     photo_url?: string;
     phone?: string;
     email: string;
-    is_verified?: boolean;  // ← added this
+    is_verified?: boolean;
   };
   is_saved?: boolean;
   created_at: string;
@@ -147,7 +151,7 @@ export interface PropertyList {
   total: number;
   page: number;
   page_size: number;
-  pages: number;
+  total_pages: number; // was incorrectly named "pages" — backend field is total_pages
 }
 
 export interface PropertyFilters {
@@ -182,17 +186,19 @@ export const properties = {
   delete: (id: string) =>
     request(`/properties/${id}`, { method: 'DELETE' }),
 
+  // Backend uses a single POST toggle for both save and unsave
   save: (id: string) =>
-    request(`/properties/${id}/save`, { method: 'POST' }),
+    request<{ message: string }>(`/properties/${id}/save`, { method: 'POST' }),
 
   unsave: (id: string) =>
-    request(`/properties/${id}/save`, { method: 'DELETE' }),
+    request<{ message: string }>(`/properties/${id}/save`, { method: 'POST' }),
 
+  // Correct URL: /properties/saved/me
   saved: (page = 1) =>
-    request<PropertyList>(`/properties/saved?page=${page}`),
+    request<Property[]>(`/properties/saved/me?page=${page}`),
 
-  myListings: () =>
-    request<Property[]>('/properties/my-listings'),
+  myListings: (page = 1) =>
+    request<PropertyList>(`/properties/my-listings?page=${page}`),
 };
 
 // ── Messages ──────────────────────────────────────────────────────────
@@ -226,14 +232,23 @@ export const messages = {
   startConversation: (body: { agent_id: string; property_id?: string; first_message: string }) =>
     request<Conversation>('/messages/conversations', { method: 'POST', body: JSON.stringify(body) }),
 
+  getConversation: (conversationId: string) =>
+    request<Conversation>(`/messages/conversations/${conversationId}`),
+
+  // Correct endpoint: GET /messages/conversations/{id}/messages
   getMessages: (conversationId: string) =>
     request<Message[]>(`/messages/conversations/${conversationId}/messages`),
 
-  send: (conversationId: string, content: string) =>
+  send: (conversationId: string, content: string, attachments: object[] = []) =>
     request<Message>(`/messages/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ content, attachments: [] }),
+      body: JSON.stringify({ content, attachments }),
     }),
+
+  markRead: (conversationId: string) =>
+    request(`/messages/conversations/${conversationId}/read`, { method: 'POST' }),
+
+  unreadCount: () => request<{ unread: number }>('/messages/unread-count'),
 };
 
 // ── Offers ────────────────────────────────────────────────────────────
@@ -254,10 +269,12 @@ export interface Offer {
 }
 
 export const offers = {
-  list: () => request<Offer[]>('/offers'),
+  // Correct endpoint: /offers/me (not /offers)
+  list: () => request<Offer[]>('/offers/me'),
   get: (id: string) => request<Offer>(`/offers/${id}`),
   create: (body: object) => request<Offer>('/offers', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: string, body: object) => request<Offer>(`/offers/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  forProperty: (propertyId: string) => request<Offer[]>(`/offers/property/${propertyId}`),
 };
 
 // ── Viewings ──────────────────────────────────────────────────────────
@@ -267,7 +284,7 @@ export interface Viewing {
   property_id: string;
   buyer_id: string;
   scheduled_at: string;
-  status: string;
+  status: 'scheduled' | 'confirmed' | 'completed' | 'cancelled';
   notes?: string;
   contact_name?: string;
   contact_email?: string;
@@ -276,9 +293,11 @@ export interface Viewing {
 }
 
 export const viewings = {
-  list: () => request<Viewing[]>('/viewings'),
+  list: () => request<Viewing[]>('/viewings/me'),
+  agentUpcoming: () => request<Viewing[]>('/viewings/agent/upcoming'),
   create: (body: object) => request<Viewing>('/viewings', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: string, body: object) => request<Viewing>(`/viewings/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  cancel: (id: string) => request<{ message: string }>(`/viewings/${id}`, { method: 'DELETE' }),
 };
 
 // ── Notifications ─────────────────────────────────────────────────────
@@ -295,5 +314,5 @@ export interface Notification {
 
 export const notifications = {
   list: () => request<Notification[]>('/users/me/notifications'),
-  markRead: (id: string) => request(`/users/me/notifications/${id}/read`, { method: 'PATCH' }),
+  markAllRead: () => request('/users/me/notifications/read-all', { method: 'POST' }),
 };

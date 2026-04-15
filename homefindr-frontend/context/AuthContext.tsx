@@ -6,8 +6,8 @@ import { auth, setTokens, clearTokens, type User } from '@/lib/api';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (body: { full_name: string; email: string; phone?: string; password: string; role: string }) => Promise<void>;
+  login: (email: string, password: string) => Promise<User>;
+  register: (body: { full_name: string; email: string; phone?: string; password: string; role: string }) => Promise<User>;
   logout: () => void;
   refresh: () => Promise<void>;
 }
@@ -34,19 +34,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const login = async (email: string, password: string) => {
+  // Returns the user object so callers can redirect based on role
+  const login = async (email: string, password: string): Promise<User> => {
     const tokens = await auth.login(email, password);
     setTokens(tokens.access_token, tokens.refresh_token);
     const me = await auth.me();
     setUser(me);
+    return me;
   };
 
-  const register = async (body: { full_name: string; email: string; phone?: string; password: string; role: string }) => {
+  // Returns the user object so callers can redirect based on role
+  const register = async (body: { full_name: string; email: string; phone?: string; password: string; role: string }): Promise<User> => {
     await auth.register(body);
     const tokens = await auth.login(body.email, body.password);
     setTokens(tokens.access_token, tokens.refresh_token);
     const me = await auth.me();
     setUser(me);
+    return me;
   };
 
   const logout = () => {
@@ -66,4 +70,11 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
   return ctx;
+}
+
+/** Returns the correct dashboard path for a given role */
+export function dashboardFor(role: User['role']): string {
+  if (role === 'agent') return '/dashboard/agent';
+  if (role === 'admin') return '/dashboard/admin';
+  return '/dashboard/buyer';
 }

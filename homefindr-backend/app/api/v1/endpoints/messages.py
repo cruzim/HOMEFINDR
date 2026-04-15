@@ -3,9 +3,11 @@ Messaging endpoints — conversations and messages between buyers and agents.
 Real-time delivery is handled by Socket.IO (see socketio_app.py).
 These REST endpoints handle persistence and history.
 """
+from datetime import datetime, timezone
 from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_, select, desc, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -16,7 +18,7 @@ from app.schemas.schemas import (
 )
 from app.api.v1.deps import CurrentUser
 
-router = APIRouter(prefix="/messages", tags=["messages"])
+router = APIRouter()
 
 
 @router.get("/conversations", response_model=List[ConversationOut])
@@ -34,7 +36,7 @@ async def list_conversations(
             )
         )
         .options(selectinload(Conversation.messages))
-        .order_by(desc(Conversation.last_message_at))
+        .order_by(Conversation.last_message_at.desc().nullslast())
     )
     result = await db.execute(stmt)
     return result.scalars().all()
@@ -66,20 +68,17 @@ async def start_conversation(
     conv: Conversation | None = existing.scalar_one_or_none()
 
     if conv:
-        # Append the message to existing conversation
         msg = Message(
             conversation_id=conv.id,
             sender_id=current_user.id,
             content=body.first_message,
         )
         db.add(msg)
-        from datetime import datetime, timezone
         conv.last_message_at = datetime.now(timezone.utc)
         await db.flush()
         await db.refresh(conv, ["messages"])
         return conv
 
-    # Create new
     conv = Conversation(
         buyer_id=current_user.id,
         agent_id=body.agent_id,
@@ -94,30 +93,35 @@ async def start_conversation(
         content=body.first_message,
     )
     db.add(msg)
-    from datetime import datetime, timezone
     conv.last_message_at = datetime.now(timezone.utc)
     await db.flush()
     await db.refresh(conv, ["messages"])
     return conv
 
 
-@router.get("/conversations/{conv_id}", response_model=ConversationOut)
-async def get_conversation(
+# ── IMPORTANT: /conversations/{conv_id}/messages must come before
+#    /conversations/{conv_id} so FastAPI doesn't treat "messages" as
+#    a conv_id value on GET requests.
+
+@router.get("/conversations/{conv_id}/messages", response_model=List[MessageOut])
+async def get_messages(
     conv_id: str,
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
-) -> Conversation:
-    """Get a single conversation with all messages."""
-    result = await db.execute(
-        select(Conversation)
-        .where(Conversation.id == conv_id)
-        .options(selectinload(Conversation.messages))
-    )
+) -> list:
+    """Get the full message history for a conversation."""
+    result = await db.execute(select(Conversation).where(Conversation.id == conv_id))
     conv: Conversation | None = result.scalar_one_or_none()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     _assert_conv_access(conv, current_user)
-    return conv
+
+    msgs = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conv_id)
+        .order_by(Message.created_at.asc())
+    )
+    return msgs.scalars().all()
 
 
 @router.post("/conversations/{conv_id}/messages", response_model=MessageOut, status_code=status.HTTP_201_CREATED)
@@ -141,11 +145,28 @@ async def send_message(
         attachments=body.attachments,
     )
     db.add(msg)
-
-    from datetime import datetime, timezone
     conv.last_message_at = datetime.now(timezone.utc)
     await db.flush()
     return msg
+
+
+@router.get("/conversations/{conv_id}", response_model=ConversationOut)
+async def get_conversation(
+    conv_id: str,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+) -> Conversation:
+    """Get a single conversation with all messages."""
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == conv_id)
+        .options(selectinload(Conversation.messages))
+    )
+    conv: Conversation | None = result.scalar_one_or_none()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    _assert_conv_access(conv, current_user)
+    return conv
 
 
 @router.post("/conversations/{conv_id}/read", status_code=status.HTTP_204_NO_CONTENT)
@@ -178,7 +199,6 @@ async def unread_count(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Return total unread message count for the current user."""
-    from sqlalchemy import func
     result = await db.execute(
         select(func.count(Message.id))
         .join(Conversation, Conversation.id == Message.conversation_id)

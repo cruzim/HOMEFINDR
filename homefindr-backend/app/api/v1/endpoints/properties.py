@@ -155,6 +155,60 @@ async def featured_properties(
     return result.scalars().all()
 
 
+# ── IMPORTANT: all static sub-paths must come BEFORE /{property_id} ──
+
+@router.get("/saved/me", response_model=List[PropertyOut])
+async def my_saved_properties(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+) -> list:
+    """Return all properties saved by the current user."""
+    result = await db.execute(
+        _property_query(
+            select(Property)
+            .join(SavedProperty, SavedProperty.property_id == Property.id)
+            .where(SavedProperty.user_id == current_user.id)
+            .order_by(desc(SavedProperty.created_at))
+        )
+    )
+    return result.scalars().all()
+
+
+@router.get("/my-listings", response_model=PropertyListOut)
+async def my_listings(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: AgentOrAdmin,
+    db: AsyncSession = Depends(get_db),
+) -> PropertyListOut:
+    """Return all listings created by the authenticated agent (or all for admin)."""
+    if current_user.role == UserRole.admin:
+        stmt = select(Property)
+    else:
+        stmt = select(Property).where(Property.agent_id == current_user.id)
+
+    count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+    total = count_result.scalar_one()
+
+    result = await db.execute(
+        _property_query(stmt)
+        .order_by(desc(Property.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    items = result.scalars().all()
+
+    return PropertyListOut(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=max(1, -(-total // page_size)),
+    )
+
+
+# ── Dynamic path routes ───────────────────────────────────────────────
+
 @router.get("/{property_id}", response_model=PropertyOut)
 async def get_property(
     property_id: str,
@@ -168,7 +222,6 @@ async def get_property(
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    # Increment view count (fire-and-forget style — no separate write transaction)
     prop.view_count += 1
     return prop
 
@@ -189,8 +242,6 @@ async def create_property(
     )
     db.add(prop)
     await db.flush()
-
-    # Reload with agent relationship
     await db.refresh(prop, ["agent"])
     return prop
 
@@ -214,7 +265,6 @@ async def update_property(
 
     data = body.model_dump(exclude_none=True)
 
-    # Track price change in history
     if "price" in data and data["price"] != prop.price:
         history = list(prop.price_history or [])
         history.append({"date": "today", "price": data["price"], "event": "Price Updated"})
@@ -255,12 +305,10 @@ async def save_property(
     db: AsyncSession = Depends(get_db),
 ) -> MessageResponse:
     """Toggle save/unsave a property for the current buyer."""
-    # Check property exists
     result = await db.execute(select(Property).where(Property.id == property_id))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Property not found")
 
-    # Check existing save
     existing = await db.execute(
         select(SavedProperty).where(
             SavedProperty.user_id == current_user.id,
@@ -271,7 +319,6 @@ async def save_property(
 
     if saved:
         await db.delete(saved)
-        # Decrement counter
         prop_res = await db.execute(select(Property).where(Property.id == property_id))
         if p := prop_res.scalar_one_or_none():
             p.save_count = max(0, p.save_count - 1)
@@ -282,20 +329,3 @@ async def save_property(
     if p2 := prop_res2.scalar_one_or_none():
         p2.save_count += 1
     return MessageResponse(message="Saved successfully")
-
-
-@router.get("/saved/me", response_model=List[PropertyOut])
-async def my_saved_properties(
-    current_user: CurrentUser,
-    db: AsyncSession = Depends(get_db),
-) -> list:
-    """Return all properties saved by the current user."""
-    result = await db.execute(
-        _property_query(
-            select(Property)
-            .join(SavedProperty, SavedProperty.property_id == Property.id)
-            .where(SavedProperty.user_id == current_user.id)
-            .order_by(desc(SavedProperty.created_at))
-        )
-    )
-    return result.scalars().all()

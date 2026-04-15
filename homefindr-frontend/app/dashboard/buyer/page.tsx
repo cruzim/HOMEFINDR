@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Search, Heart, Calendar, MessageSquare, TrendingUp, MapPin, BedDouble, Bath } from 'lucide-react';
+import { Search, Heart, Calendar, MessageSquare, TrendingUp, MapPin } from 'lucide-react';
 import DashboardSidebar from '@/components/layout/DashboardSidebar';
 import Footer from '@/components/layout/Footer';
 import { properties as api, viewings as viewApi, offers as offerApi, type Property, type Viewing, type Offer } from '@/lib/api';
@@ -23,12 +23,17 @@ export default function BuyerDashboard() {
     if (!loading && !user) { router.push('/auth/login'); return; }
     if (user) {
       Promise.all([
-        api.saved().catch(() => ({ items: [] })),
-        viewApi.list().catch(() => []),
-        offerApi.list().catch(() => []),
+        api.saved().catch(() => [] as Property[]),
+        viewApi.list().catch(() => [] as Viewing[]),
+        offerApi.list().catch(() => [] as Offer[]),
       ]).then(([savedRes, viewRes, offerRes]) => {
-        setSaved((savedRes as { items: Property[] }).items.slice(0, 3));
-        setUpcoming((viewRes as Viewing[]).filter(v => v.status === 'pending' || v.status === 'confirmed').slice(0, 3));
+        setSaved((savedRes as Property[]).slice(0, 3));
+        // 'scheduled' is the correct initial status — not 'pending'
+        setUpcoming(
+          (viewRes as Viewing[])
+            .filter(v => v.status === 'scheduled' || v.status === 'confirmed')
+            .slice(0, 3)
+        );
         setMyOffers((offerRes as Offer[]).slice(0, 3));
       }).finally(() => setFetching(false));
     }
@@ -48,7 +53,7 @@ export default function BuyerDashboard() {
           {/* Header */}
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Welcome back, {firstName} 👋</h1>
-            <p className="text-sm text-gray-500 mt-1">Here's your home search activity</p>
+            <p className="text-sm text-gray-500 mt-1">Here&apos;s your home search activity</p>
           </div>
 
           {/* Stats */}
@@ -139,7 +144,9 @@ export default function BuyerDashboard() {
                       <p className="text-sm font-semibold text-gray-900">Property Viewing</p>
                       <p className="text-xs text-gray-500">{formatDate(v.scheduled_at)}</p>
                     </div>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full capitalize ${v.status === 'confirmed' ? 'bg-emerald-50 text-emerald-700' : 'bg-yellow-50 text-yellow-700'}`}>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full capitalize ${
+                      v.status === 'confirmed' ? 'bg-emerald-50 text-emerald-700' : 'bg-yellow-50 text-yellow-700'
+                    }`}>
                       {v.status}
                     </span>
                   </div>

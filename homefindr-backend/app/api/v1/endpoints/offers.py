@@ -12,7 +12,7 @@ from app.models.models import Offer, OfferStatus, Property, User, UserRole
 from app.schemas.schemas import MessageResponse, OfferCreate, OfferOut, OfferUpdate
 from app.api.v1.deps import CurrentUser
 
-router = APIRouter(prefix="/offers", tags=["offers"])
+router = APIRouter()
 
 
 @router.post("", response_model=OfferOut, status_code=status.HTTP_201_CREATED)

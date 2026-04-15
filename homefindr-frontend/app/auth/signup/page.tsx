@@ -5,7 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Home, CheckCircle } from 'lucide-react';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth, dashboardFor } from '@/context/AuthContext';
 import toast from 'react-hot-toast';
 
 export default function SignupPage() {
@@ -16,19 +16,19 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
- async function handleSubmit(e: React.FormEvent) {
-  e.preventDefault();
-  setError('');
-  if (!/\d/.test(form.password)) {
-    setError('Password must contain at least one digit.');
-    return;
-  }
-  setLoading(true);
-  // ... rest unchanged
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    if (!/\d/.test(form.password)) {
+      setError('Password must contain at least one digit.');
+      return;
+    }
+    setLoading(true);
     try {
-      await register({ ...form, role, phone: form.phone || undefined });
+      const user = await register({ ...form, role, phone: form.phone || undefined });
       toast.success('Account created! Welcome to HomeFindr.');
-      router.push(role === 'agent' ? '/dashboard/agent' : '/dashboard/buyer');
+      // Redirect to the correct dashboard for the user's role
+      router.push(dashboardFor(user.role));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Registration failed';
       setError(msg);

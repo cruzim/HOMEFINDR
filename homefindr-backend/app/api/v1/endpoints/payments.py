@@ -18,7 +18,7 @@ from app.api.v1.deps import CurrentUser
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
-router = APIRouter(prefix="/payments", tags=["payments"])
+router = APIRouter()
 
 
 @router.post("/create-intent", response_model=PaymentIntentOut, status_code=status.HTTP_201_CREATED)
