@@ -16,10 +16,15 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
+ async function handleSubmit(e: React.FormEvent) {
+  e.preventDefault();
+  setError('');
+  if (!/\d/.test(form.password)) {
+    setError('Password must contain at least one digit.');
+    return;
+  }
+  setLoading(true);
+  // ... rest unchanged
     try {
       await register({ ...form, role, phone: form.phone || undefined });
       toast.success('Account created! Welcome to HomeFindr.');

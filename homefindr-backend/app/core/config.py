@@ -3,7 +3,7 @@ Application configuration loaded from environment variables.
 All sensitive values must come from .env — never hardcoded.
 """
 from functools import lru_cache
-from typing import List
+from typing import List, Union
 from pydantic import AnyHttpUrl, EmailStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -22,14 +22,18 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
     FRONTEND_URL: str = "http://localhost:3000"
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000"]
+    ALLOWED_ORIGINS: Union[List[str], str] = ["http://localhost:3000"]
 
-    @field_validator("ALLOWED_ORIGINS", mode="before")
-    @classmethod
-    def parse_origins(cls, v: str | List[str]) -> List[str]:
-        if isinstance(v, str):
-            return [o.strip() for o in v.split(",")]
-        return v
+@field_validator("ALLOWED_ORIGINS", mode="before")
+@classmethod
+def parse_origins(cls, v):
+    if isinstance(v, str):
+        v = v.strip()
+        if v.startswith("["):
+            import json
+            return json.loads(v)
+        return [o.strip() for o in v.split(",") if o.strip()]
+    return v
 
     # ── Database ──────────────────────────────────────────────────────
     DATABASE_URL: str
