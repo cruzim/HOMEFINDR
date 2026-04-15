@@ -19,7 +19,7 @@ export default function FavoritesPage() {
   useEffect(() => {
     if (!loading && !user) { router.push('/auth/login'); return; }
     if (user) {
-      api.saved().then(res => setSaved(res.items)).catch(() => {}).finally(() => setFetching(false));
+      api.saved().then(res => setSaved(res)).catch(() => {}).finally(() => setFetching(false));
     }
   }, [user, loading, router]);
 
