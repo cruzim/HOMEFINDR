@@ -38,7 +38,7 @@ from app.schemas.schemas import (
 from app.api.v1.deps import CurrentUser
 import httpx
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter()
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)

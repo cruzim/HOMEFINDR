@@ -17,7 +17,7 @@ from app.schemas.schemas import (
 )
 from app.api.v1.deps import AgentOrAdmin, CurrentUser
 
-router = APIRouter(prefix="/properties", tags=["properties"])
+router = APIRouter()
 
 
 def _property_query(stmt):
