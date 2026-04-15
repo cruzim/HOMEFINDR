@@ -1,6 +1,7 @@
 """
 HomeFindr Backend — FastAPI application factory.
 """
+import logging
 import time
 from contextlib import asynccontextmanager
 
@@ -12,28 +13,57 @@ from starlette.applications import Starlette
 
 from app.core.config import settings
 from app.api.v1.router import api_router
-# UPDATED: Import engine and Base to handle table creation
 from app.db.session import init_db, engine
-from app.models.models import Base 
+from app.models.models import Base
 from app.services.socketio_app import socket_app
 from app.schemas.schemas import HealthCheck
 
-# ── Lifespan ──────────────────────────────────────────────────────────
+logger = logging.getLogger(__name__)
+
+# ── Allowed origins (single source of truth) ──────────────────────────
+
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "https://homefindr.vercel.app",
+    "https://homefindr-frontend.vercel.app",
+]
+
+
+def _cors_headers(request: Request) -> dict:
+    """Return CORS headers for a given request origin (used in error handlers)."""
+    origin = request.headers.get("origin", "")
+    if origin in ALLOWED_ORIGINS:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+        }
+    return {}
+
+
+# ── Shared startup logic ───────────────────────────────────────────────
+
+async def _create_tables() -> None:
+    """Ensure all DB tables exist. Safe to call multiple times (create_all is idempotent)."""
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables verified / created.")
+    except Exception:
+        logger.exception("Failed to create database tables on startup.")
+        raise
+
+
+# ── FastAPI lifespan ───────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # UPDATED: We force table creation here to ensure "users" table exists
-    # This runs every time the app starts, but create_all is safe: 
-    # it won't overwrite existing data.
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
-    # Keep your existing logic for development-specific seeding if needed
+    await _create_tables()
     if settings.is_development:
         await init_db()
     yield
 
-# ── FastAPI instance ──────────────────────────────────────────────────
+
+# ── FastAPI instance ───────────────────────────────────────────────────
 
 app = FastAPI(
     title="HomeFindr API",
@@ -45,21 +75,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── Middleware ────────────────────────────────────────────────────────
-
-origins = [
-    "http://localhost:3000",
-    "https://homefindr.vercel.app",
-    "https://homefindr-frontend.vercel.app",
-]
+# ── CORS middleware ────────────────────────────────────────────────────
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Timing middleware ──────────────────────────────────────────────────
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
@@ -68,21 +94,26 @@ async def add_process_time_header(request: Request, call_next):
     response.headers["X-Process-Time"] = f"{(time.perf_counter() - start) * 1000:.2f}ms"
     return response
 
-# ── Global exception handlers ─────────────────────────────────────────
+# ── Global exception handlers ──────────────────────────────────────────
+# These handlers add CORS headers manually so that the browser can actually
+# read the error body when a non-2xx response is returned from an origin
+# the CORS middleware would otherwise have allowed.
 
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc):
     return JSONResponse(
         status_code=status.HTTP_404_NOT_FOUND,
         content={"detail": "Resource not found"},
+        headers=_cors_headers(request),
     )
 
-@app.exception_handler(500)
-async def internal_error_handler(request: Request, exc):
-    # Helpful for debugging: logging the error can help identify DB issues
+@app.exception_handler(Exception)
+async def internal_error_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception for %s %s", request.method, request.url)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "Internal server error — our team has been notified"},
+        headers=_cors_headers(request),
     )
 
 # ── Routes ────────────────────────────────────────────────────────────
@@ -106,11 +137,22 @@ async def root() -> dict:
         "health": "/health",
     }
 
-# ── ASGI composition ──────────────────────────────────────────────────
+
+# ── ASGI composition ───────────────────────────────────────────────────
+# combined_app is what Railway actually runs (uvicorn app.main:combined_app).
+# It needs its own lifespan so that _create_tables() is guaranteed to run
+# even if Starlette doesn't propagate the mounted FastAPI app's lifespan.
+
+@asynccontextmanager
+async def combined_lifespan(app: Starlette):
+    await _create_tables()
+    yield
+
 
 combined_app = Starlette(
+    lifespan=combined_lifespan,
     routes=[
         Mount("/socket.io", app=socket_app),
         Mount("/", app=app),
-    ]
+    ],
 )
