@@ -48,9 +48,16 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/api/docs" if not settings.is_production else None,
     redoc_url="/api/redoc" if not settings.is_production else None,
-    openapi_url="/api/openapi.json",
+    # openapi_url="/api/openapi.json",
+    openapi_url=f"{settings.API_V1_STR}/openapi.json"
     lifespan=lifespan,
 )
+# Set all CORS enabled origins
+# We include localhost for dev and your Vercel URL for production
+origins = [
+    "http://localhost:3000",
+    "https://homefindr.vercel.app",
+]
 
 
 # ── Middleware ────────────────────────────────────────────────────────
