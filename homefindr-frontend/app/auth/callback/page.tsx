@@ -1,32 +1,51 @@
 'use client';
-import { useEffect } from 'react';
+
+import { useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function AuthCallback() {
+// 1. Create a separate component for the logic
+function AuthCallbackHandler() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
   useEffect(() => {
-    // Extract the token sent back from your backend after successful Google OAuth
     const token = searchParams.get('token');
-    
+    const error = searchParams.get('error');
+
+    if (error) {
+      console.error("Auth error:", error);
+      router.push(`/auth/login?error=${error}`);
+      return;
+    }
+
     if (token) {
-      // Store the token for future authenticated requests
+      // Save token to local storage
       localStorage.setItem('auth_token', token);
-      // Redirect the user to their dashboard
+      // Redirect to dashboard
       router.push('/dashboard');
     } else {
-      // Redirect to login with an error if no token is found
-      router.push('/auth/login?error=OAuthFailed');
+      // Fallback if no token is present
+      router.push('/auth/login');
     }
   }, [searchParams, router]);
 
   return (
-    <div className="flex items-center justify-center min-h-screen">
-      <div className="text-center">
-        <h1 className="text-xl font-semibold">Completing login...</h1>
-        <p className="text-gray-500">Please wait while we redirect you.</p>
-      </div>
+    <div className="flex flex-col items-center justify-center min-h-screen">
+      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
+      <p className="mt-4 text-gray-600">Completing sign-in...</p>
     </div>
+  );
+}
+
+// 2. Wrap the handler in Suspense in the default export
+export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen">
+        <p>Loading authentication...</p>
+      </div>
+    }>
+      <AuthCallbackHandler />
+    </Suspense>
   );
 }
