@@ -284,7 +284,7 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
               <div className="flex justify-between"><span className="text-gray-500">Size</span><span className="font-medium">{property.sqft.toLocaleString()} sqft</span></div>
               {property.year_built && <div className="flex justify-between"><span className="text-gray-500">Year Built</span><span className="font-medium">{property.year_built}</span></div>}
               <div className="flex justify-between"><span className="text-gray-500">Commission</span><span className="font-medium">{property.commission_pct}%</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Views</span><span className="font-medium">{property.views}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Views</span><span className="font-medium">{property.view_count || 0}</span></div>
             </div>
           </div>
         </div>
