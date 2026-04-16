@@ -38,8 +38,8 @@ export default function AgentDashboard() {
     return <div className="flex min-h-screen items-center justify-center"><div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /></div>;
   }
 
-  const totalViews = myListings.reduce((sum, p) => sum + (p.views || 0), 0);
-  const totalSaves = myListings.reduce((sum, p) => sum + (p.saves || 0), 0);
+  const totalViews = myListings.reduce((sum, p) => sum + (p.view_count || 0), 0);
+  const totalSaves = myListings.reduce((sum, p) => sum + (p.save_count || 0), 0);
   const activeListings = myListings.filter(p => p.status === 'active').length;
   const pendingOffers = offers.filter(o => o.status === 'sent').length;
 
@@ -130,7 +130,7 @@ export default function AgentDashboard() {
                             {p.status}
                           </span>
                         </td>
-                        <td className="px-4 py-3 hidden lg:table-cell text-gray-500">{p.views || 0}</td>
+                        <td className="px-4 py-3 hidden lg:table-cell text-gray-500">{p.view_count || 0}</td>
                         <td className="px-4 py-3">
                           <div className="flex gap-2">
                             <Link href={`/listing/${p.id}`} className="text-xs text-blue-600 hover:underline font-medium">View</Link>
