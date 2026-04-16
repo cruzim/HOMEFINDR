@@ -127,7 +127,7 @@ class Property(Base):
     commission_pct: Mapped[float] = mapped_column(Numeric(5, 2), default=5.0)
 
     # Specs
-    property_type: Mapped[PropertyType] = mapped_column(Enum(PropertyType), nullable=False, index=True)
+    property_type: Mapped[PropertyType] = mapped_column(Enum(PropertyType, values_callable=lambda x: [e.value for e in x]), nullable=False, index=True)
     beds: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     baths: Mapped[float] = mapped_column(Numeric(4, 1), nullable=False)
     sqft: Mapped[int] = mapped_column(Integer, nullable=False)
