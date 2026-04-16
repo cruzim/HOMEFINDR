@@ -72,7 +72,7 @@ export interface User {
   full_name: string;
   phone?: string;
   photo_url?: string;
-  role: 'buyer' | 'agent' | 'admin';
+  role?: 'buyer' | 'agent' | 'admin' | 'manager';
   is_active: boolean;
   is_verified: boolean;
   created_at: string;

@@ -119,7 +119,7 @@ export interface User {
   email: string;
   phone?: string;
   photo?: string;
-  role: 'buyer' | 'agent' | 'admin';
+  role?: 'buyer' | 'agent' | 'admin' | 'manager';
   createdAt: string;
   preferences?: {
     notifications: boolean;
