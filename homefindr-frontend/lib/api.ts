@@ -316,3 +316,38 @@ export const notifications = {
   list: () => request<Notification[]>('/users/me/notifications'),
   markAllRead: () => request('/users/me/notifications/read-all', { method: 'POST' }),
 };
+// ── Admin ─────────────────────────────────────────────────────────────
+
+export const admin = {
+  // Listings awaiting approval (status = draft)
+  pendingListings: () => request<Property[]>('/admin/listings/pending'),
+
+  // All listings regardless of status — uses the standard list endpoint with no status filter
+  allListings: (page = 1, page_size = 100) =>
+    request<PropertyList>(`/properties?page=${page}&page_size=${page_size}&status=draft`)
+      .then(async (drafts) => {
+        const active = await request<PropertyList>(`/properties?page=1&page_size=${page_size}&status=active`);
+        const pending = await request<PropertyList>(`/properties?page=1&page_size=${page_size}&status=pending`);
+        const rejected = await request<PropertyList>(`/properties?page=1&page_size=${page_size}&status=rejected`);
+        return {
+          items: [...drafts.items, ...active.items, ...pending.items, ...rejected.items],
+          total: drafts.total + active.total + pending.total + rejected.total,
+        };
+      }),
+
+  approveListing: (id: string) =>
+    request<{ message: string }>(`/admin/listings/${id}/approve`, { method: 'POST' }),
+
+  rejectListing: (id: string) =>
+    request<{ message: string }>(`/admin/listings/${id}/reject`, { method: 'POST' }),
+
+  featureListing: (id: string) =>
+    request<{ message: string }>(`/admin/listings/${id}/feature`, { method: 'POST' }),
+
+  stats: () => request<{
+    users: { total: number; buyers: number; agents: number };
+    listings: { active: number; pending_review: number };
+    activity: { total_offers: number; total_viewings: number };
+    revenue_naira: number;
+  }>('/admin/stats'),
+};

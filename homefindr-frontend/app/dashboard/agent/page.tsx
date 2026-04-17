@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Plus, Eye, Heart, TrendingUp, MessageSquare, MapPin } from 'lucide-react';
+import { Plus, Eye, Heart, TrendingUp, MessageSquare, MapPin, Clock, CheckCircle } from 'lucide-react';
 import DashboardSidebar from '@/components/layout/DashboardSidebar';
 import Footer from '@/components/layout/Footer';
 import { properties as api, offers as offerApi, type Property, type Offer } from '@/lib/api';
-import { formatPrice, formatDate, getStatusColor, getOfferStatusColor } from '@/lib/utils';
+import { formatPrice, formatDate, getStatusColor, getOfferStatusColor, cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 
@@ -25,8 +25,8 @@ export default function AgentDashboard() {
     }
     if (user) {
       Promise.all([
-        api.myListings().catch(() => []),
-        offerApi.list().catch(() => []),
+        api.myListings().catch(() => [] as Property[]),
+        offerApi.list().catch(() => [] as Offer[]),
       ]).then(([listings, offs]) => {
         setMyListings(Array.isArray(listings) ? listings as Property[] : []);
         setOffers(Array.isArray(offs) ? offs as Offer[] : []);
@@ -41,6 +41,7 @@ export default function AgentDashboard() {
   const totalViews = myListings.reduce((sum, p) => sum + (p.view_count || 0), 0);
   const totalSaves = myListings.reduce((sum, p) => sum + (p.save_count || 0), 0);
   const activeListings = myListings.filter(p => p.status === 'active').length;
+  const draftListings = myListings.filter(p => p.status === 'draft').length;
   const pendingOffers = offers.filter(o => o.status === 'sent').length;
 
   return (
@@ -58,10 +59,25 @@ export default function AgentDashboard() {
             </Link>
           </div>
 
+          {/* Pending approval banner */}
+          {!fetching && draftListings > 0 && (
+            <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+              <Clock size={16} className="text-amber-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-amber-800">
+                  {draftListings} listing{draftListings > 1 ? 's' : ''} pending admin approval
+                </p>
+                <p className="text-xs text-amber-600 mt-0.5">
+                  Your submitted listing{draftListings > 1 ? 's are' : ' is'} under review. Once approved, {draftListings > 1 ? 'they' : 'it'} will be visible to all users on HomeFindr.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: 'Active Listings', value: activeListings, icon: MapPin, color: 'text-blue-500 bg-blue-50' },
+              { label: 'Active Listings', value: activeListings, icon: CheckCircle, color: 'text-blue-500 bg-blue-50' },
               { label: 'Total Views', value: totalViews.toLocaleString(), icon: Eye, color: 'text-purple-500 bg-purple-50' },
               { label: 'Total Saves', value: totalSaves, icon: Heart, color: 'text-red-500 bg-red-50' },
               { label: 'Pending Offers', value: pendingOffers, icon: TrendingUp, color: 'text-emerald-500 bg-emerald-50' },
@@ -105,14 +121,14 @@ export default function AgentDashboard() {
                     <tr>
                       <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Property</th>
                       <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase hidden md:table-cell">Price</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase hidden md:table-cell">Status</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
                       <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase hidden lg:table-cell">Views</th>
                       <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {myListings.map(p => (
-                      <tr key={p.id} className="hover:bg-gray-50 transition-colors">
+                      <tr key={p.id} className={cn('hover:bg-gray-50 transition-colors', p.status === 'draft' && 'bg-amber-50/40')}>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <div className="w-12 h-10 rounded-lg overflow-hidden bg-gray-100 shrink-0">
@@ -125,16 +141,23 @@ export default function AgentDashboard() {
                           </div>
                         </td>
                         <td className="px-4 py-3 hidden md:table-cell font-semibold text-gray-900">{formatPrice(p.price)}</td>
-                        <td className="px-4 py-3 hidden md:table-cell">
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full capitalize ${getStatusColor(p.status)}`}>
-                            {p.status}
-                          </span>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col gap-0.5">
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full capitalize w-fit ${getStatusColor(p.status)}`}>
+                              {p.status}
+                            </span>
+                            {p.status === 'draft' && (
+                              <span className="text-[10px] text-amber-600 flex items-center gap-0.5">
+                                <Clock size={9} /> Pending approval
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3 hidden lg:table-cell text-gray-500">{p.view_count || 0}</td>
                         <td className="px-4 py-3">
-                          <div className="flex gap-2">
-                            <Link href={`/listing/${p.id}`} className="text-xs text-blue-600 hover:underline font-medium">View</Link>
-                          </div>
+                          <Link href={`/listing/${p.id}`} className="text-xs text-blue-600 hover:underline font-medium">
+                            {p.status === 'draft' ? 'Preview' : 'View'}
+                          </Link>
                         </td>
                       </tr>
                     ))}
