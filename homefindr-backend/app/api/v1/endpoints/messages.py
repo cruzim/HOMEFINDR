@@ -17,6 +17,7 @@ from app.schemas.schemas import (
     ConversationCreate, ConversationOut, MessageCreate, MessageOut,
 )
 from app.api.v1.deps import CurrentUser
+from app.utils.notifications import create_notification
 
 router = APIRouter()
 
@@ -146,6 +147,19 @@ async def send_message(
     )
     db.add(msg)
     conv.last_message_at = datetime.now(timezone.utc)
+
+    # Notify the other participant
+    recipient_id = conv.agent_id if current_user.id == conv.buyer_id else conv.buyer_id
+    preview = body.content[:80] + ("…" if len(body.content) > 80 else "")
+    await create_notification(
+        db,
+        user_id=recipient_id,
+        title=f"New message from {current_user.full_name}",
+        body=preview,
+        type_="message",
+        reference_id=conv_id,
+    )
+
     await db.flush()
     return msg
 

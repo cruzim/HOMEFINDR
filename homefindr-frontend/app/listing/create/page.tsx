@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { CheckCircle, ArrowLeft, ArrowRight, Plus, X } from 'lucide-react';
+import { CheckCircle, ArrowLeft, ArrowRight, Plus, X, Upload, ImageIcon } from 'lucide-react';
 import DashboardSidebar from '@/components/layout/DashboardSidebar';
 import { PROPERTY_TYPES, AMENITIES_LIST, NIGERIAN_AREAS, cn } from '@/lib/utils';
-import { properties as api } from '@/lib/api';
+import { properties as api, uploadImages } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
@@ -15,9 +15,12 @@ const STEPS = ['Media & Photos', 'Property Details', 'Review & Publish'];
 export default function CreateListingPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [step, setStep] = useState(1);
-  const [photos, setPhotos] = useState<string[]>([]);
-  const [photoInput, setPhotoInput] = useState('');
+  const [photos, setPhotos] = useState<string[]>([]);       // final uploaded URLs
+  const [previews, setPreviews] = useState<string[]>([]);   // local blob previews
+  const [uploading, setUploading] = useState(false);
   const [published, setPublished] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [createdId, setCreatedId] = useState('');
@@ -41,21 +44,69 @@ export default function CreateListingPage() {
     }
   }, [user, loading, router]);
 
+  // Revoke blob URLs on unmount to avoid memory leaks
+  useEffect(() => {
+    return () => { previews.forEach(URL.revokeObjectURL); };
+  }, [previews]);
+
   function setField(k: string, v: unknown) { setDetails(d => ({ ...d, [k]: v })); }
   function toggleAmenity(a: string) {
     setDetails(d => ({ ...d, amenities: d.amenities.includes(a) ? d.amenities.filter(x => x !== a) : [...d.amenities, a] }));
   }
 
-  function addPhoto() {
-    const url = photoInput.trim();
-    if (!url) return;
-    setPhotos(ps => [...ps, url]);
-    setPhotoInput('');
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    if (photos.length + files.length > 20) {
+      toast.error('Maximum 20 photos per listing');
+      return;
+    }
+
+    // Show local previews immediately
+    const newPreviews = files.map(f => URL.createObjectURL(f));
+    setPreviews(prev => [...prev, ...newPreviews]);
+
+    // Upload to backend
+    setUploading(true);
+    try {
+      const urls = await uploadImages(files);
+      setPhotos(prev => [...prev, ...urls]);
+      // Replace the blob previews with real URLs
+      setPreviews(prev => {
+        const replaced = [...prev];
+        const startIdx = replaced.length - newPreviews.length;
+        urls.forEach((url, i) => { replaced[startIdx + i] = url; });
+        return replaced;
+      });
+      toast.success(`${files.length} photo${files.length > 1 ? 's' : ''} uploaded`);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Upload failed');
+      // Remove the failed previews
+      setPreviews(prev => prev.filter(p => !newPreviews.includes(p)));
+      newPreviews.forEach(URL.revokeObjectURL);
+    } finally {
+      setUploading(false);
+      // Reset input so same file can be re-selected
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  function removePhoto(index: number) {
+    setPhotos(prev => prev.filter((_, i) => i !== index));
+    setPreviews(prev => {
+      const p = prev[index];
+      if (p?.startsWith('blob:')) URL.revokeObjectURL(p);
+      return prev.filter((_, i) => i !== index);
+    });
   }
 
   async function handlePublish() {
     if (!details.title || !details.address || !details.price) {
       toast.error('Please fill in all required fields');
+      return;
+    }
+    if (photos.length === 0) {
+      toast.error('Please add at least one photo');
       return;
     }
     setPublishing(true);
@@ -72,7 +123,7 @@ export default function CreateListingPage() {
       });
       setCreatedId(created.id);
       setPublished(true);
-      toast.success('Listing published!');
+      toast.success('Listing submitted for review!');
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Failed to publish');
     } finally {
@@ -93,9 +144,9 @@ export default function CreateListingPage() {
             <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-6">
               <CheckCircle size={40} className="text-emerald-500" />
             </div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Listing Published!</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Listing Submitted!</h2>
             <p className="text-sm text-gray-500 mb-8">
-              <strong>{details.title || details.address}</strong> is now live on HomeFindr.
+              <strong>{details.title || details.address}</strong> has been submitted for admin review. It will go live once approved.
             </p>
             <div className="flex gap-3 justify-center">
               <Link href="/dashboard/agent" className="px-5 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">
@@ -103,7 +154,7 @@ export default function CreateListingPage() {
               </Link>
               {createdId && (
                 <Link href={`/listing/${createdId}`} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors">
-                  View Listing
+                  Preview Listing
                 </Link>
               )}
             </div>
@@ -140,58 +191,115 @@ export default function CreateListingPage() {
 
         <div className="flex-1 p-4 md:p-8 max-w-3xl">
 
-          {/* STEP 1 — Media */}
+          {/* ── STEP 1 — Media ── */}
           {step === 1 && (
             <div className="space-y-6">
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">Add Photos</h1>
-                <p className="text-sm text-gray-500 mt-0.5">Paste image URLs to showcase your property. High-quality photos sell 32% faster.</p>
+                <p className="text-sm text-gray-500 mt-0.5">Upload photos from your device. High-quality photos sell 32% faster.</p>
               </div>
 
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
-                <div className="flex gap-2">
-                  <input
-                    value={photoInput}
-                    onChange={e => setPhotoInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && addPhoto()}
-                    placeholder="Paste an image URL (https://...)"
-                    className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button onClick={addPhoto} className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors flex items-center gap-1">
-                    <Plus size={16} /> Add
-                  </button>
-                </div>
+                {/* Hidden file input — accepts images from camera or gallery */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  className="hidden"
+                  onChange={handleFileSelect}
+                />
 
-                {photos.length > 0 ? (
+                {/* Upload zone */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className={cn(
+                    'w-full border-2 border-dashed rounded-xl p-8 text-center transition-colors',
+                    uploading
+                      ? 'border-blue-300 bg-blue-50 cursor-wait'
+                      : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50 cursor-pointer'
+                  )}>
+                  {uploading ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                      <p className="text-sm text-blue-600 font-medium">Uploading photos…</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3 text-gray-400">
+                      <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
+                        <Upload size={22} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-700">Tap to upload photos</p>
+                        <p className="text-xs text-gray-400 mt-0.5">JPEG, PNG or WebP · up to 10 MB each · max 20 photos</p>
+                      </div>
+                      <span className="px-4 py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg">
+                        Choose from Gallery / Camera
+                      </span>
+                    </div>
+                  )}
+                </button>
+
+                {/* Photo grid */}
+                {previews.length > 0 && (
                   <div className="grid grid-cols-3 gap-3">
-                    {photos.map((url, i) => (
+                    {previews.map((src, i) => (
                       <div key={i} className="relative aspect-video bg-gray-100 rounded-xl overflow-hidden group">
-                        <img src={url} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=300&q=60'; }} />
+                        <img src={src} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" />
                         {i === 0 && (
                           <span className="absolute top-1 left-1 text-[9px] font-bold px-1.5 py-0.5 bg-blue-600 text-white rounded">COVER</span>
                         )}
-                        <button onClick={() => setPhotos(ps => ps.filter((_, idx) => idx !== i))}
+                        {/* Show spinner overlay while still a blob (not yet uploaded) */}
+                        {src.startsWith('blob:') && (
+                          <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                            <div className="w-5 h-5 border-2 border-white/60 border-t-white rounded-full animate-spin" />
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removePhoto(i)}
                           className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full hidden group-hover:flex items-center justify-center">
                           <X size={12} />
                         </button>
                       </div>
                     ))}
-                  </div>
-                ) : (
-                  <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center text-gray-400">
-                    <p className="text-sm">No photos added yet</p>
-                    <p className="text-xs mt-1">Paste image URLs above to add photos</p>
+
+                    {/* Add-more tile */}
+                    {previews.length < 20 && (
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploading}
+                        className="aspect-video bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors disabled:opacity-50">
+                        <Plus size={20} />
+                        <span className="text-[10px] mt-1">Add more</span>
+                      </button>
+                    )}
                   </div>
                 )}
+
+                <div className="flex items-center justify-between text-xs text-gray-400">
+                  <span>{previews.length} / 20 photos</span>
+                  {previews.length > 0 && (
+                    <button type="button" onClick={() => { setPhotos([]); setPreviews([]); }} className="text-red-400 hover:text-red-600">
+                      Remove all
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <button onClick={() => setStep(2)} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2">
+              <button
+                onClick={() => setStep(2)}
+                disabled={uploading}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2">
                 Continue <ArrowRight size={16} />
               </button>
             </div>
           )}
 
-          {/* STEP 2 — Details */}
+          {/* ── STEP 2 — Details ── */}
           {step === 2 && (
             <div className="space-y-6">
               <div>
@@ -301,7 +409,7 @@ export default function CreateListingPage() {
             </div>
           )}
 
-          {/* STEP 3 — Review */}
+          {/* ── STEP 3 — Review ── */}
           {step === 3 && (
             <div className="space-y-6">
               <div>
@@ -310,6 +418,20 @@ export default function CreateListingPage() {
               </div>
 
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
+                {/* Photo strip */}
+                {previews.length > 0 && (
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {previews.slice(0, 5).map((src, i) => (
+                      <img key={i} src={src} alt="" className="w-20 h-14 object-cover rounded-lg shrink-0" />
+                    ))}
+                    {previews.length > 5 && (
+                      <div className="w-20 h-14 bg-gray-100 rounded-lg shrink-0 flex items-center justify-center text-xs text-gray-500 font-medium">
+                        +{previews.length - 5}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div><span className="text-gray-500">Title</span><p className="font-medium text-gray-900 mt-0.5">{details.title || '—'}</p></div>
                   <div><span className="text-gray-500">Price</span><p className="font-bold text-blue-600 mt-0.5">₦{details.price.toLocaleString()}</p></div>
@@ -317,7 +439,7 @@ export default function CreateListingPage() {
                   <div><span className="text-gray-500">Location</span><p className="font-medium text-gray-900 mt-0.5">{details.area}, {details.city}</p></div>
                   <div><span className="text-gray-500">Type</span><p className="font-medium text-gray-900 mt-0.5">{details.property_type}</p></div>
                   <div><span className="text-gray-500">Size</span><p className="font-medium text-gray-900 mt-0.5">{details.beds} beds · {details.baths} baths · {details.sqft.toLocaleString()} sqft</p></div>
-                  <div><span className="text-gray-500">Photos</span><p className="font-medium text-gray-900 mt-0.5">{photos.length} added</p></div>
+                  <div><span className="text-gray-500">Photos</span><p className="font-medium text-gray-900 mt-0.5">{photos.length} uploaded</p></div>
                   <div><span className="text-gray-500">Amenities</span><p className="font-medium text-gray-900 mt-0.5">{details.amenities.length || 'None'}</p></div>
                 </div>
 

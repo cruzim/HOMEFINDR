@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, Heart, MessageSquare, Bell, Menu, X, ChevronDown, Home, MapPin, LogOut, User, Settings, LayoutDashboard } from 'lucide-react';
 import Image from 'next/image';
 import { cn, NIGERIAN_CITIES, NIGERIAN_AREAS } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
+import { messages as msgApi, notifications as notifApi, type Notification } from '@/lib/api';
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -17,8 +18,13 @@ export default function Navbar() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  // Notifications
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifList, setNotifList] = useState<Notification[]>([]);
+  const [unreadMsgs, setUnreadMsgs] = useState(0);
   const searchRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
 
   const isPublic = pathname === '/';
 
@@ -26,10 +32,43 @@ export default function Navbar() {
     function handleClickOutside(e: MouseEvent) {
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) setShowSuggestions(false);
       if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) setUserMenuOpen(false);
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Poll notifications + unread message count every 30s
+  const pollCounts = useCallback(async () => {
+    if (!user) return;
+    try {
+      const [notifs, unread] = await Promise.all([
+        notifApi.list(),
+        msgApi.unreadCount(),
+      ]);
+      setNotifList(notifs);
+      setUnreadMsgs(unread.unread ?? 0);
+    } catch {}
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    pollCounts();
+    const interval = setInterval(pollCounts, 30_000);
+    return () => clearInterval(interval);
+  }, [user, pollCounts]);
+
+  async function openNotifications() {
+    setNotifOpen(o => !o);
+    if (!notifOpen && unreadNotifCount > 0) {
+      try {
+        await notifApi.markAllRead();
+        setNotifList(ns => ns.map(n => ({ ...n, is_read: true })));
+      } catch {}
+    }
+  }
+
+  const unreadNotifCount = notifList.filter(n => !n.is_read).length;
 
   function handleSearchChange(val: string) {
     setQuery(val);
@@ -51,7 +90,7 @@ export default function Navbar() {
   }
 
   const dashboardHref = user?.role === 'agent' ? '/dashboard/agent'
-    : user?.role === 'admin' || user?.role === 'manager' ? '/dashboard/admin'
+    : user?.role === 'admin' ? '/dashboard/admin'
     : '/dashboard/buyer';
 
   const initials = user
@@ -112,12 +151,63 @@ export default function Navbar() {
               <Link href="/favorites" className="relative p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors" title="Saved">
                 <Heart size={20} />
               </Link>
+
+              {/* Messages icon with unread badge */}
               <Link href="/messages" className="relative p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors" title="Messages">
                 <MessageSquare size={20} />
+                {unreadMsgs > 0 && (
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border border-white" />
+                )}
               </Link>
-              <button className="relative p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors" title="Notifications">
-                <Bell size={20} />
-              </button>
+
+              {/* Notification bell with dropdown */}
+              <div ref={notifRef} className="relative">
+                <button
+                  onClick={openNotifications}
+                  className="relative p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="Notifications">
+                  <Bell size={20} />
+                  {unreadNotifCount > 0 && (
+                    <span className="absolute top-1 right-1 min-w-[16px] h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-0.5 border border-white">
+                      {unreadNotifCount > 9 ? '9+' : unreadNotifCount}
+                    </span>
+                  )}
+                </button>
+
+                {notifOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-80 bg-white border border-gray-100 rounded-xl shadow-xl z-50 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                      <p className="font-semibold text-gray-900 text-sm">Notifications</p>
+                      {unreadNotifCount > 0 && (
+                        <span className="text-xs text-blue-600">{unreadNotifCount} new</span>
+                      )}
+                    </div>
+                    <div className="max-h-80 overflow-y-auto">
+                      {notifList.length === 0 ? (
+                        <div className="p-6 text-center text-gray-400">
+                          <Bell size={24} className="mx-auto mb-2 text-gray-300" />
+                          <p className="text-xs">No notifications yet</p>
+                        </div>
+                      ) : (
+                        notifList.slice(0, 20).map(n => (
+                          <div key={n.id} className={cn('px-4 py-3 border-b border-gray-50 last:border-0', !n.is_read && 'bg-blue-50/60')}>
+                            <p className="text-sm font-medium text-gray-900">{n.title}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">{n.body}</p>
+                            <p className="text-[10px] text-gray-400 mt-1">{formatTime(n.created_at)}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    {notifList.length > 0 && (
+                      <div className="px-4 py-2 border-t border-gray-100">
+                        <Link href="/dashboard/buyer" className="text-xs text-blue-600 hover:underline">
+                          View dashboard
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </>
           )}
 
@@ -151,7 +241,7 @@ export default function Navbar() {
                   <Link href="/favorites" className="flex items-center gap-2.5 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50" onClick={() => setUserMenuOpen(false)}>
                     <Heart size={15} className="text-gray-400" /> Saved Listings
                   </Link>
-                  {(user.role === 'agent') && (
+                  {user.role === 'agent' && (
                     <Link href="/listing/create" className="flex items-center gap-2.5 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50" onClick={() => setUserMenuOpen(false)}>
                       <Settings size={15} className="text-gray-400" /> Create Listing
                     </Link>
@@ -186,7 +276,10 @@ export default function Navbar() {
           {user ? (
             <>
               <Link href="/favorites" className="block px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg" onClick={() => setMobileOpen(false)}>Saved Listings</Link>
-              <Link href="/messages" className="block px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg" onClick={() => setMobileOpen(false)}>Messages</Link>
+              <Link href="/messages" className="flex items-center justify-between px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg" onClick={() => setMobileOpen(false)}>
+                Messages
+                {unreadMsgs > 0 && <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded-full">{unreadMsgs}</span>}
+              </Link>
               <Link href={dashboardHref} className="block px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg" onClick={() => setMobileOpen(false)}>Dashboard</Link>
               <button onClick={() => { setMobileOpen(false); logout(); }} className="block w-full text-left px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg">Sign Out</button>
             </>
@@ -200,4 +293,11 @@ export default function Navbar() {
       )}
     </header>
   );
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' });
 }

@@ -144,3 +144,19 @@ async def toggle_user_active(
         raise HTTPException(status_code=404, detail="User not found")
     user.is_active = not user.is_active
     return user
+
+# ── Public user lookup (no admin required) ────────────────────────────
+
+from app.schemas.schemas import AgentOut
+
+@router.get("/{user_id}/public", response_model=AgentOut)
+async def get_public_profile(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Return a user's public profile (name, photo, role). Used by messages page."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user: User | None = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user

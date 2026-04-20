@@ -1,18 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { Camera, Bell, Shield, CheckCircle } from 'lucide-react';
 import DashboardSidebar from '@/components/layout/DashboardSidebar';
 import Footer from '@/components/layout/Footer';
 import { useAuth } from '@/context/AuthContext';
-import { auth } from '@/lib/api';
+import { auth, uploadImages } from '@/lib/api';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 
 export default function ProfilePage() {
   const { user, refresh, loading } = useAuth();
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState({
     full_name: '',
@@ -23,6 +24,9 @@ export default function ProfilePage() {
     notif_sms: false,
   });
   const [saving, setSaving] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  // Local preview before upload confirms
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user) { router.push('/auth/login'); return; }
@@ -37,6 +41,31 @@ export default function ProfilePage() {
       });
     }
   }, [user, loading, router]);
+
+  async function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Show local preview immediately
+    const blobUrl = URL.createObjectURL(file);
+    setPhotoPreview(blobUrl);
+
+    setUploadingPhoto(true);
+    try {
+      const [url] = await uploadImages([file]);
+      setForm(f => ({ ...f, photo_url: url }));
+      setPhotoPreview(null);
+      URL.revokeObjectURL(blobUrl);
+      toast.success('Photo uploaded — save your profile to apply it');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Photo upload failed');
+      setPhotoPreview(null);
+      URL.revokeObjectURL(blobUrl);
+    } finally {
+      setUploadingPhoto(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -61,13 +90,15 @@ export default function ProfilePage() {
   if (loading || !user) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   const role = user.role === 'agent' ? 'agent' : 'buyer';
   const initials = user.full_name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2);
+  // Display priority: local preview → new uploaded URL → existing profile URL
+  const displayPhoto = photoPreview ?? form.photo_url ?? null;
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -83,33 +114,46 @@ export default function ProfilePage() {
           <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
             <h2 className="font-semibold text-gray-900 mb-4">Profile Photo</h2>
             <div className="flex items-center gap-5">
-              <div className="relative w-20 h-20 rounded-full overflow-hidden border-4 border-white shadow-md shrink-0 bg-blue-600 flex items-center justify-center">
-                {user.photo_url ? (
-                  <Image src={user.photo_url} alt="Profile" fill className="object-cover" />
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={handlePhotoSelect}
+              />
+
+              {/* Avatar + click-to-change */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingPhoto}
+                className="relative w-20 h-20 rounded-full overflow-hidden border-4 border-white shadow-md shrink-0 bg-blue-600 flex items-center justify-center group focus:outline-none focus:ring-2 focus:ring-blue-400"
+                title="Change profile photo"
+              >
+                {displayPhoto ? (
+                  <Image src={displayPhoto} alt="Profile" fill className="object-cover" unoptimized={displayPhoto.startsWith('blob:')} />
                 ) : (
                   <span className="text-white text-2xl font-bold">{initials}</span>
                 )}
-                <button className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity rounded-full">
-                  <Camera size={18} className="text-white" />
-                </button>
-              </div>
+
+                {/* Hover/loading overlay */}
+                <div className={`absolute inset-0 flex items-center justify-center rounded-full transition-opacity ${uploadingPhoto ? 'bg-black/50 opacity-100' : 'bg-black/40 opacity-0 group-hover:opacity-100'}`}>
+                  {uploadingPhoto
+                    ? <div className="w-5 h-5 border-2 border-white/50 border-t-white rounded-full animate-spin" />
+                    : <Camera size={18} className="text-white" />
+                  }
+                </div>
+              </button>
+
               <div>
                 <p className="font-semibold text-gray-900">{user.full_name}</p>
                 <p className="text-sm text-gray-500">{user.email}</p>
                 <span className="inline-block mt-1 text-xs font-semibold px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full capitalize">{user.role}</span>
+                <p className="text-xs text-gray-400 mt-2">
+                  {uploadingPhoto ? 'Uploading…' : 'Tap the photo to change it'}
+                </p>
               </div>
-            </div>
-
-            <div className="mt-4">
-              <label className="text-sm font-medium text-gray-700 block mb-1.5">Photo URL</label>
-              <input
-                type="url"
-                value={form.photo_url}
-                onChange={e => setForm(f => ({ ...f, photo_url: e.target.value }))}
-                placeholder="https://..."
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <p className="text-xs text-gray-400 mt-1">Paste a direct image URL (e.g. from Gravatar)</p>
             </div>
           </div>
 
@@ -176,7 +220,7 @@ export default function ProfilePage() {
             <p className="text-xs text-gray-400 mt-3">Member since {new Date(user.created_at).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })}</p>
           </div>
 
-          <button onClick={handleSave} disabled={saving}
+          <button onClick={handleSave} disabled={saving || uploadingPhoto}
             className="w-full py-3 rounded-xl font-bold transition-all bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white flex items-center justify-center gap-2">
             {saving ? <><div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin" /> Saving...</> : 'Save Changes'}
           </button>

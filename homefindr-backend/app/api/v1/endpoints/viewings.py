@@ -11,6 +11,7 @@ from app.db.session import get_db
 from app.models.models import Property, User, UserRole, Viewing, ViewingStatus
 from app.schemas.schemas import MessageResponse, ViewingCreate, ViewingOut, ViewingUpdate
 from app.api.v1.deps import CurrentUser
+from app.utils.notifications import create_notification
 
 router = APIRouter()
 
@@ -39,6 +40,20 @@ async def schedule_viewing(
         status=ViewingStatus.scheduled,
     )
     db.add(viewing)
+
+    # Notify the listing agent
+    prop_res = await db.execute(select(Property).where(Property.id == body.property_id))
+    prop = prop_res.scalar_one_or_none()
+    if prop:
+        await create_notification(
+            db,
+            user_id=prop.agent_id,
+            title="New viewing request",
+            body=f"{current_user.full_name} wants to view your listing on {body.scheduled_at.strftime('%b %d at %I:%M %p')}",
+            type_="viewing",
+            reference_id=body.property_id,
+        )
+
     await db.flush()
     return viewing
 

@@ -351,3 +351,27 @@ export const admin = {
     revenue_naira: number;
   }>('/admin/stats'),
 };
+
+// ── Media Upload ───────────────────────────────────────────────────────
+// Sends files as multipart/form-data to POST /media/upload
+// Returns array of public URLs from the backend (Cloudflare R2).
+
+export async function uploadImages(files: File[]): Promise<string[]> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('hf_access_token') : null;
+  const form = new FormData();
+  files.forEach(f => form.append('files', f));
+
+  const res = await fetch(`${BASE}/media/upload`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { detail = (await res.json()).detail || detail; } catch {}
+    throw new Error(detail);
+  }
+  const data = await res.json();
+  return data.urls as string[];
+}

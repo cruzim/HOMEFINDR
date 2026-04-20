@@ -11,6 +11,7 @@ from app.db.session import get_db
 from app.models.models import Offer, OfferStatus, Property, User, UserRole
 from app.schemas.schemas import MessageResponse, OfferCreate, OfferOut, OfferUpdate
 from app.api.v1.deps import CurrentUser
+from app.utils.notifications import create_notification
 
 router = APIRouter()
 
@@ -57,6 +58,17 @@ async def create_offer(
         status=OfferStatus.sent,
     )
     db.add(offer)
+
+    # Notify listing agent
+    await create_notification(
+        db,
+        user_id=prop.agent_id,
+        title="New offer received",
+        body=f"{current_user.full_name} made an offer of ₦{body.offer_price:,} on your listing",
+        type_="offer",
+        reference_id=body.property_id,
+    )
+
     await db.flush()
     return offer
 
@@ -147,6 +159,25 @@ async def update_offer(
         if p := prop_result2.scalar_one_or_none():
             from app.models.models import PropertyStatus
             p.status = PropertyStatus.pending
+
+    # Notify buyer of status change
+    if body.status:
+        status_labels = {
+            OfferStatus.accepted: "accepted 🎉",
+            OfferStatus.rejected: "declined",
+            OfferStatus.countered: "countered",
+            OfferStatus.reviewed: "reviewed",
+        }
+        label = status_labels.get(body.status)
+        if label:
+            await create_notification(
+                db,
+                user_id=offer.buyer_id,
+                title=f"Your offer was {label}",
+                body=f"The agent has {label} your offer of ₦{offer.offer_price:,}",
+                type_="offer",
+                reference_id=offer.property_id,
+            )
 
     return offer
 
