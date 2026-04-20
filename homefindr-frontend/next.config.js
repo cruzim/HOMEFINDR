@@ -7,8 +7,8 @@ const nextConfig = {
   { protocol: 'https', hostname: 'randomuser.me' },
   { protocol: 'https', hostname: 'ui-avatars.com' },
   // add this:
-  { protocol: 'https', hostname: 'https://5a1ac8c13e14eaa53632513a26afbc60.r2.cloudflarestorage.com' },
-  { protocol: 'https', hostname: 'https://pub-807924a44e4b40d5ba6f93ee145fc31c.r2.dev' },
+  { protocol: 'https', hostname: '5a1ac8c13e14eaa53632513a26afbc60.r2.cloudflarestorage.com' },
+  { protocol: 'https', hostname: 'pub-807924a44e4b40d5ba6f93ee145fc31c.r2.dev' },
   // Google profile photos (OAuth)
   { protocol: 'https', hostname: 'lh3.googleusercontent.com' },
   { protocol: 'https', hostname: 'lh4.googleusercontent.com' },
