@@ -3,7 +3,7 @@
 import { useState, useEffect, use } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Heart, Share2, Phone, MessageSquare, Calendar, MapPin, BedDouble, Bath, Maximize, ChevronLeft, ChevronRight, CheckCircle, X } from 'lucide-react';
+import { Heart, Share2, Phone, MessageSquare, Calendar, MapPin, BedDouble, Bath, Maximize, ChevronLeft, ChevronRight, CheckCircle, X, Play } from 'lucide-react';
 import Footer from '@/components/layout/Footer';
 import PropertyCard from '@/components/features/PropertyCard';
 import { properties as api, messages as msgApi, type Property } from '@/lib/api';
@@ -21,6 +21,7 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
   const [related, setRelated] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [imgIndex, setImgIndex] = useState(0);
+  const [showVideo, setShowVideo] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
   const [showContact, setShowContact] = useState(false);
@@ -111,9 +112,21 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
     <div className="flex flex-col">
       {/* Gallery */}
       <section className="relative bg-black h-[420px] md:h-[560px]">
-        <Image src={images[imgIndex]} alt={property.title} fill className="object-cover opacity-90" priority />
 
-        {images.length > 1 && (
+        {/* ── Video player ── */}
+        {showVideo && property.video_url ? (
+          <video
+            src={property.video_url}
+            controls
+            autoPlay
+            className="w-full h-full object-contain"
+          />
+        ) : (
+          <Image src={images[imgIndex]} alt={property.title} fill className="object-cover opacity-90" priority />
+        )}
+
+        {/* Photo nav arrows — only when showing photos */}
+        {!showVideo && images.length > 1 && (
           <>
             <button onClick={prev} className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/60 hover:bg-black/80 text-white rounded-full flex items-center justify-center z-10">
               <ChevronLeft size={20} />
@@ -124,8 +137,27 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
           </>
         )}
 
-        {images.length > 1 && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 z-10">
+        {/* Photo / Video tab switcher */}
+        {property.video_url && (
+          <div className="absolute bottom-4 left-4 flex gap-2 z-10">
+            <button
+              onClick={() => setShowVideo(false)}
+              className={cn('px-3 py-1.5 rounded-full text-xs font-semibold transition-colors',
+                !showVideo ? 'bg-white text-gray-900' : 'bg-black/50 text-white hover:bg-black/70')}>
+              📷 Photos
+            </button>
+            <button
+              onClick={() => setShowVideo(true)}
+              className={cn('px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1 transition-colors',
+                showVideo ? 'bg-white text-gray-900' : 'bg-black/50 text-white hover:bg-black/70')}>
+              <Play size={11} /> Video
+            </button>
+          </div>
+        )}
+
+        {/* Thumbnail strip — only when showing photos */}
+        {!showVideo && images.length > 1 && (
+          <div className={cn('absolute flex gap-2 z-10', property.video_url ? 'bottom-16 left-1/2 -translate-x-1/2' : 'bottom-4 left-1/2 -translate-x-1/2')}>
             {images.slice(0, 6).map((img, i) => (
               <button key={i} onClick={() => setImgIndex(i)}
                 className={`w-14 h-10 rounded-lg overflow-hidden border-2 transition-all ${i === imgIndex ? 'border-white scale-110' : 'border-white/40'}`}>
@@ -135,9 +167,12 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
           </div>
         )}
 
-        <div className="absolute top-4 right-4 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full z-10">
-          {imgIndex + 1} / {images.length}
-        </div>
+        {/* Counter — only when showing photos */}
+        {!showVideo && (
+          <div className="absolute top-4 right-4 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full z-10">
+            {imgIndex + 1} / {images.length}
+          </div>
+        )}
 
         <span className={cn('absolute top-4 left-4 text-xs font-bold px-3 py-1.5 rounded-full z-10 capitalize',
           property.status === 'active' ? 'bg-emerald-500 text-white' : 'bg-gray-500 text-white')}>
