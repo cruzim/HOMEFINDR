@@ -32,12 +32,12 @@ def get_s3_client():
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
 async def upload_images(
-    current_user: AgentOrAdmin,
+    current_user: CurrentUser,
     files: List[UploadFile] = File(...),
 ) -> dict:
     """
-    Upload up to 20 images for a property listing.
-    Returns a list of public URLs.
+    Upload images (property photos or profile picture).
+    Any authenticated user can upload. Returns a list of public URLs.
     """
     if len(files) > 20:
         raise HTTPException(status_code=400, detail="Maximum 20 files per upload")
