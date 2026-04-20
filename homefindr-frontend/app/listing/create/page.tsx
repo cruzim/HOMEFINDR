@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { CheckCircle, ArrowLeft, ArrowRight, Plus, X, Upload, ImageIcon } from 'lucide-react';
+import { CheckCircle, ArrowLeft, ArrowRight, Plus, X, Upload, Video, Play } from 'lucide-react';
 import DashboardSidebar from '@/components/layout/DashboardSidebar';
 import { PROPERTY_TYPES, AMENITIES_LIST, NIGERIAN_AREAS, cn } from '@/lib/utils';
 import { properties as api, uploadImages } from '@/lib/api';
@@ -15,12 +15,16 @@ const STEPS = ['Media & Photos', 'Property Details', 'Review & Publish'];
 export default function CreateListingPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState(1);
-  const [photos, setPhotos] = useState<string[]>([]);       // final uploaded URLs
-  const [previews, setPreviews] = useState<string[]>([]);   // local blob previews
-  const [uploading, setUploading] = useState(false);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const [videoUrl, setVideoUrl] = useState('');
+  const [videoPreview, setVideoPreview] = useState('');
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
   const [published, setPublished] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [createdId, setCreatedId] = useState('');
@@ -33,7 +37,7 @@ export default function CreateListingPage() {
     property_type: 'Detached Duplex',
     price: 350000000, commission_pct: 5,
     amenities: [] as string[],
-    virtual_tour_url: '', video_url: '',
+    virtual_tour_url: '',
   });
 
   useEffect(() => {
@@ -44,9 +48,8 @@ export default function CreateListingPage() {
     }
   }, [user, loading, router]);
 
-  // Revoke blob URLs on unmount to avoid memory leaks
   useEffect(() => {
-    return () => { previews.forEach(URL.revokeObjectURL); };
+    return () => { previews.forEach(p => { if (p.startsWith('blob:')) URL.revokeObjectURL(p); }); };
   }, [previews]);
 
   function setField(k: string, v: unknown) { setDetails(d => ({ ...d, [k]: v })); }
@@ -54,24 +57,18 @@ export default function CreateListingPage() {
     setDetails(d => ({ ...d, amenities: d.amenities.includes(a) ? d.amenities.filter(x => x !== a) : [...d.amenities, a] }));
   }
 
-  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+  // ── Photo upload ──────────────────────────────────────────────────
+  async function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
-    if (photos.length + files.length > 20) {
-      toast.error('Maximum 20 photos per listing');
-      return;
-    }
+    if (photos.length + files.length > 20) { toast.error('Maximum 20 photos per listing'); return; }
 
-    // Show local previews immediately
     const newPreviews = files.map(f => URL.createObjectURL(f));
     setPreviews(prev => [...prev, ...newPreviews]);
-
-    // Upload to backend
-    setUploading(true);
+    setUploadingPhotos(true);
     try {
       const urls = await uploadImages(files);
       setPhotos(prev => [...prev, ...urls]);
-      // Replace the blob previews with real URLs
       setPreviews(prev => {
         const replaced = [...prev];
         const startIdx = replaced.length - newPreviews.length;
@@ -80,14 +77,12 @@ export default function CreateListingPage() {
       });
       toast.success(`${files.length} photo${files.length > 1 ? 's' : ''} uploaded`);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Upload failed');
-      // Remove the failed previews
+      toast.error(err instanceof Error ? err.message : 'Photo upload failed');
       setPreviews(prev => prev.filter(p => !newPreviews.includes(p)));
       newPreviews.forEach(URL.revokeObjectURL);
     } finally {
-      setUploading(false);
-      // Reset input so same file can be re-selected
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      setUploadingPhotos(false);
+      if (photoInputRef.current) photoInputRef.current.value = '';
     }
   }
 
@@ -100,6 +95,43 @@ export default function CreateListingPage() {
     });
   }
 
+  // ── Video upload ──────────────────────────────────────────────────
+  async function handleVideoSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const MAX_VIDEO_MB = 200;
+    if (file.size > MAX_VIDEO_MB * 1024 * 1024) {
+      toast.error(`Video must be under ${MAX_VIDEO_MB}MB`);
+      return;
+    }
+
+    // Local preview immediately
+    const blobUrl = URL.createObjectURL(file);
+    setVideoPreview(blobUrl);
+    setUploadingVideo(true);
+    try {
+      const urls = await uploadImages([file]); // backend handles video too
+      if (videoPreview.startsWith('blob:')) URL.revokeObjectURL(videoPreview);
+      setVideoUrl(urls[0]);
+      setVideoPreview(urls[0]);
+      toast.success('Video uploaded');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Video upload failed');
+      URL.revokeObjectURL(blobUrl);
+      setVideoPreview('');
+    } finally {
+      setUploadingVideo(false);
+      if (videoInputRef.current) videoInputRef.current.value = '';
+    }
+  }
+
+  function removeVideo() {
+    if (videoPreview.startsWith('blob:')) URL.revokeObjectURL(videoPreview);
+    setVideoUrl('');
+    setVideoPreview('');
+  }
+
+  // ── Publish ───────────────────────────────────────────────────────
   async function handlePublish() {
     if (!details.title || !details.address || !details.price) {
       toast.error('Please fill in all required fields');
@@ -114,12 +146,12 @@ export default function CreateListingPage() {
       const created = await api.create({
         ...details,
         images: photos,
+        video_url: videoUrl || undefined,
         open_houses: [],
         highlights: [],
         lot_size: details.lot_size || undefined,
         year_built: details.year_built || undefined,
         virtual_tour_url: details.virtual_tour_url || undefined,
-        video_url: details.video_url || undefined,
       });
       setCreatedId(created.id);
       setPublished(true);
@@ -165,13 +197,14 @@ export default function CreateListingPage() {
   }
 
   const areas = NIGERIAN_AREAS[details.city] || [];
+  const uploading = uploadingPhotos || uploadingVideo;
 
   return (
     <div className="flex min-h-screen bg-gray-50">
       <DashboardSidebar role="agent" />
 
       <div className="flex-1 flex flex-col">
-        {/* Progress header */}
+        {/* Progress */}
         <div className="bg-white border-b border-gray-100 px-6 py-4">
           <div className="flex items-center gap-2 max-w-3xl">
             {STEPS.map((s, i) => (
@@ -195,33 +228,30 @@ export default function CreateListingPage() {
           {step === 1 && (
             <div className="space-y-6">
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Add Photos</h1>
-                <p className="text-sm text-gray-500 mt-0.5">Upload photos from your device. High-quality photos sell 32% faster.</p>
+                <h1 className="text-2xl font-bold text-gray-900">Media</h1>
+                <p className="text-sm text-gray-500 mt-0.5">Add photos and an optional video tour. High-quality media sells 32% faster.</p>
               </div>
 
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
-                {/* Hidden file input — accepts images from camera or gallery */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  multiple
-                  className="hidden"
-                  onChange={handleFileSelect}
-                />
+              {/* Hidden inputs */}
+              <input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={handlePhotoSelect} />
+              <input ref={videoInputRef} type="file" accept="video/mp4,video/quicktime,video/webm" className="hidden" onChange={handleVideoSelect} />
 
-                {/* Upload zone */}
+              {/* ── Photos ── */}
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-semibold text-gray-900">Photos <span className="text-red-500">*</span></h2>
+                  <span className="text-xs text-gray-400">{previews.length} / 20</span>
+                </div>
+
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={uploadingPhotos}
                   className={cn(
                     'w-full border-2 border-dashed rounded-xl p-8 text-center transition-colors',
-                    uploading
-                      ? 'border-blue-300 bg-blue-50 cursor-wait'
-                      : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50 cursor-pointer'
+                    uploadingPhotos ? 'border-blue-300 bg-blue-50 cursor-wait' : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50 cursor-pointer'
                   )}>
-                  {uploading ? (
+                  {uploadingPhotos ? (
                     <div className="flex flex-col items-center gap-3">
                       <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                       <p className="text-sm text-blue-600 font-medium">Uploading photos…</p>
@@ -233,7 +263,7 @@ export default function CreateListingPage() {
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-gray-700">Tap to upload photos</p>
-                        <p className="text-xs text-gray-400 mt-0.5">JPEG, PNG or WebP · up to 10 MB each · max 20 photos</p>
+                        <p className="text-xs text-gray-400 mt-0.5">JPEG, PNG or WebP · up to 10 MB each</p>
                       </div>
                       <span className="px-4 py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg">
                         Choose from Gallery / Camera
@@ -242,36 +272,25 @@ export default function CreateListingPage() {
                   )}
                 </button>
 
-                {/* Photo grid */}
                 {previews.length > 0 && (
                   <div className="grid grid-cols-3 gap-3">
                     {previews.map((src, i) => (
                       <div key={i} className="relative aspect-video bg-gray-100 rounded-xl overflow-hidden group">
                         <img src={src} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" />
-                        {i === 0 && (
-                          <span className="absolute top-1 left-1 text-[9px] font-bold px-1.5 py-0.5 bg-blue-600 text-white rounded">COVER</span>
-                        )}
-                        {/* Show spinner overlay while still a blob (not yet uploaded) */}
+                        {i === 0 && <span className="absolute top-1 left-1 text-[9px] font-bold px-1.5 py-0.5 bg-blue-600 text-white rounded">COVER</span>}
                         {src.startsWith('blob:') && (
                           <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
                             <div className="w-5 h-5 border-2 border-white/60 border-t-white rounded-full animate-spin" />
                           </div>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => removePhoto(i)}
+                        <button type="button" onClick={() => removePhoto(i)}
                           className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full hidden group-hover:flex items-center justify-center">
                           <X size={12} />
                         </button>
                       </div>
                     ))}
-
-                    {/* Add-more tile */}
                     {previews.length < 20 && (
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={uploading}
+                      <button type="button" onClick={() => photoInputRef.current?.click()} disabled={uploadingPhotos}
                         className="aspect-video bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors disabled:opacity-50">
                         <Plus size={20} />
                         <span className="text-[10px] mt-1">Add more</span>
@@ -280,19 +299,68 @@ export default function CreateListingPage() {
                   </div>
                 )}
 
-                <div className="flex items-center justify-between text-xs text-gray-400">
-                  <span>{previews.length} / 20 photos</span>
-                  {previews.length > 0 && (
-                    <button type="button" onClick={() => { setPhotos([]); setPreviews([]); }} className="text-red-400 hover:text-red-600">
-                      Remove all
+                {previews.length > 0 && (
+                  <div className="flex justify-end">
+                    <button type="button" onClick={() => { setPhotos([]); setPreviews([]); }}
+                      className="text-xs text-red-400 hover:text-red-600">
+                      Remove all photos
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Video Tour ── */}
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                      <Video size={16} className="text-purple-500" /> Video Tour
+                      <span className="text-xs font-normal text-gray-400 ml-1">Optional</span>
+                    </h2>
+                    <p className="text-xs text-gray-400 mt-0.5">MP4, MOV or WebM · up to 200 MB</p>
+                  </div>
+                  {videoPreview && (
+                    <button type="button" onClick={removeVideo}
+                      className="text-xs text-red-400 hover:text-red-600 flex items-center gap-1">
+                      <X size={12} /> Remove
                     </button>
                   )}
                 </div>
+
+                {videoPreview ? (
+                  <div className="relative rounded-xl overflow-hidden bg-black aspect-video">
+                    {uploadingVideo ? (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gray-900">
+                        <div className="w-8 h-8 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                        <p className="text-sm text-purple-300 font-medium">Uploading video…</p>
+                      </div>
+                    ) : (
+                      <video src={videoPreview} controls className="w-full h-full object-contain" />
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => videoInputRef.current?.click()}
+                    disabled={uploadingVideo}
+                    className="w-full border-2 border-dashed border-gray-200 hover:border-purple-400 hover:bg-purple-50 rounded-xl p-8 text-center transition-colors cursor-pointer disabled:opacity-50">
+                    <div className="flex flex-col items-center gap-3 text-gray-400">
+                      <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
+                        <Play size={22} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-700">Upload a video walkthrough</p>
+                        <p className="text-xs text-gray-400 mt-0.5">Listings with video get 4× more enquiries</p>
+                      </div>
+                      <span className="px-4 py-2 bg-purple-600 text-white text-xs font-semibold rounded-lg">
+                        Choose Video
+                      </span>
+                    </div>
+                  </button>
+                )}
               </div>
 
-              <button
-                onClick={() => setStep(2)}
-                disabled={uploading}
+              <button onClick={() => setStep(2)} disabled={uploading}
                 className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2">
                 Continue <ArrowRight size={16} />
               </button>
@@ -418,7 +486,6 @@ export default function CreateListingPage() {
               </div>
 
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
-                {/* Photo strip */}
                 {previews.length > 0 && (
                   <div className="flex gap-2 overflow-x-auto pb-1">
                     {previews.slice(0, 5).map((src, i) => (
@@ -440,6 +507,7 @@ export default function CreateListingPage() {
                   <div><span className="text-gray-500">Type</span><p className="font-medium text-gray-900 mt-0.5">{details.property_type}</p></div>
                   <div><span className="text-gray-500">Size</span><p className="font-medium text-gray-900 mt-0.5">{details.beds} beds · {details.baths} baths · {details.sqft.toLocaleString()} sqft</p></div>
                   <div><span className="text-gray-500">Photos</span><p className="font-medium text-gray-900 mt-0.5">{photos.length} uploaded</p></div>
+                  <div><span className="text-gray-500">Video</span><p className="font-medium text-gray-900 mt-0.5">{videoUrl ? '✓ Included' : 'None'}</p></div>
                   <div><span className="text-gray-500">Amenities</span><p className="font-medium text-gray-900 mt-0.5">{details.amenities.length || 'None'}</p></div>
                 </div>
 
