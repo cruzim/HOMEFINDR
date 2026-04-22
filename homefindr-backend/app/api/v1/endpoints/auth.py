@@ -15,7 +15,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.main import limiter
+from app.core.limiter import limiter
 
 from app.core.config import settings
 from app.core.security import (
