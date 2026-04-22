@@ -105,6 +105,9 @@ export default function MessagesPage() {
       setMsgs(conv.messages || []);
     }
 
+    // Mark all messages in this conversation as read (fixes persistent unread dot)
+    try { await api.markRead(conv.id); } catch { /* non-critical */ }
+
     // Fetch names if not yet in cache
     const token = localStorage.getItem('hf_access_token');
     const toFetch = [conv.buyer_id, conv.agent_id].filter(id => !userNames[id]);

@@ -10,11 +10,12 @@ GET  /auth/me         — current user profile
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.main import limiter
 
 from app.core.config import settings
 from app.core.security import (
@@ -42,7 +43,8 @@ router = APIRouter()
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-async def register(body: UserRegister, db: AsyncSession = Depends(get_db)) -> User:
+@limiter.limit("5/minute")  # AUDIT FIX [6.8]: prevent registration brute-force
+async def register(request: Request, body: UserRegister, db: AsyncSession = Depends(get_db)) -> User:
     """Create a new user account (buyer or agent)."""
     # Check duplicate email
     existing = await db.execute(select(User).where(User.email == body.email))
@@ -66,7 +68,8 @@ async def register(body: UserRegister, db: AsyncSession = Depends(get_db)) -> Us
 
 
 @router.post("/login", response_model=TokenPair)
-async def login(body: UserLogin, db: AsyncSession = Depends(get_db)) -> TokenPair:
+@limiter.limit("10/minute")  # AUDIT FIX [6.8]: prevent credential stuffing
+async def login(request: Request, body: UserLogin, db: AsyncSession = Depends(get_db)) -> TokenPair:
     """Authenticate with email + password. Returns access + refresh tokens."""
     result = await db.execute(select(User).where(User.email == body.email))
     user: User | None = result.scalar_one_or_none()

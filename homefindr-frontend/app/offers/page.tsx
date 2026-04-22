@@ -3,8 +3,8 @@
 import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { ArrowLeft, CheckCircle, TrendingUp } from 'lucide-react';
-import { properties as propApi, offers as offerApi, type Property, type Offer } from '@/lib/api';
+import { ArrowLeft, CheckCircle, TrendingUp, XCircle, MessageSquare } from 'lucide-react';
+import { properties as propApi, offers as offerApi, type Property, type Offer, User } from '@/lib/api';
 import { formatFullPrice, formatPrice, formatDate, getOfferStatusColor, cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import DashboardSidebar from '@/components/layout/DashboardSidebar';
@@ -12,6 +12,8 @@ import Footer from '@/components/layout/Footer';
 import toast from 'react-hot-toast';
 
 const CONTINGENCIES = ['Home Inspection', 'Appraisal', 'Financing', "Sale of Buyer's Home"];
+
+// ── Buyer: Make Offer Form ─────────────────────────────────────────────────────
 
 function MakeOfferForm({ propertyId, property }: { propertyId: string; property: Property }) {
   const router = useRouter();
@@ -59,7 +61,7 @@ function MakeOfferForm({ propertyId, property }: { propertyId: string; property:
           </div>
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Offer Submitted!</h2>
           <p className="text-sm text-gray-500 mb-6">
-            Your offer of <strong>{formatFullPrice(bidPrice)}</strong> has been submitted to the seller.
+            Your offer of <strong>{formatFullPrice(bidPrice)}</strong> has been sent to the agent.
           </p>
           <div className="bg-gray-50 rounded-xl p-4 mb-6 text-left">
             <p className="font-semibold text-sm text-gray-900">{property.title || property.address}</p>
@@ -90,7 +92,6 @@ function MakeOfferForm({ propertyId, property }: { propertyId: string; property:
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Make an Offer</h1>
         <p className="text-sm text-gray-500 mb-6">{property.title || property.address} · {formatPrice(property.price)}</p>
 
-        {/* Progress */}
         <div className="flex items-center gap-2 mb-8">
           {steps.map((s, i) => (
             <div key={s} className="flex items-center flex-1 last:flex-none">
@@ -150,13 +151,13 @@ function MakeOfferForm({ propertyId, property }: { propertyId: string; property:
             </div>
 
             <div>
-              <label className="text-sm font-medium text-gray-700 block mb-1.5">Notes to Seller (optional)</label>
+              <label className="text-sm font-medium text-gray-700 block mb-1.5">Notes to Agent (optional)</label>
               <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
                 placeholder="Add any personal message or terms..."
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
             </div>
 
-            <button onClick={() => setStep(2)} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl flex items-center justify-center gap-2">
+            <button onClick={() => setStep(2)} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl">
               Review Offer
             </button>
           </div>
@@ -192,39 +193,202 @@ function MakeOfferForm({ propertyId, property }: { propertyId: string; property:
   );
 }
 
-function OffersListContent() {
-  const searchParams = useSearchParams();
-  const { user, loading } = useAuth();
-  const router = useRouter();
-  const propertyId = searchParams.get('propertyId');
+// ── Agent: Offer Management ────────────────────────────────────────────────────
 
-  const [property, setProperty] = useState<Property | null>(null);
+function AgentOffersView({ user }: { user: User }) {
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [fetching, setFetching] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [counterInput, setCounterInput] = useState<Record<string, number>>({});
+  const [showCounter, setShowCounter] = useState<string | null>(null);
+
+  useEffect(() => {
+    offerApi.list().then(setOffers).catch(() => {}).finally(() => setFetching(false));
+  }, [user.id]);
+
+  async function handleAction(offerId: string, status: string, counterPrice?: number) {
+    setActionLoading(offerId + status);
+    try {
+      const updated = await offerApi.update(offerId, {
+        status,
+        ...(counterPrice ? { counter_price: counterPrice } : {}),
+      });
+      setOffers(prev => prev.map(o => o.id === offerId ? { ...o, ...updated } : o));
+      setShowCounter(null);
+      toast.success(
+        status === 'accepted' ? 'Offer accepted!' :
+        status === 'rejected' ? 'Offer declined' :
+        'Counter offer sent'
+      );
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Action failed');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  const pending = offers.filter(o => o.status === 'sent' || o.status === 'reviewed');
+  const resolved = offers.filter(o => !['sent', 'reviewed'].includes(o.status));
+
+  return (
+    <div className="flex min-h-screen bg-gray-50">
+      <DashboardSidebar role="agent" />
+      <div className="flex-1 flex flex-col">
+        <div className="flex-1 p-4 md:p-8">
+          <div className="mb-6">
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <TrendingUp size={22} className="text-blue-600" /> Offers Received
+            </h1>
+            <p className="text-sm text-gray-500 mt-1">
+              {pending.length} pending · {resolved.length} resolved
+            </p>
+          </div>
+
+          {fetching ? (
+            <div className="space-y-3">{[...Array(4)].map((_, i) => <div key={i} className="h-24 bg-gray-100 rounded-xl animate-pulse" />)}</div>
+          ) : offers.length === 0 ? (
+            <div className="text-center py-20 text-gray-400">
+              <TrendingUp size={48} className="mx-auto mb-4 text-gray-200" />
+              <p className="text-lg font-medium text-gray-600 mb-2">No offers yet</p>
+              <p className="text-sm">Offers from buyers will appear here once your listings receive interest.</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Pending offers */}
+              {pending.length > 0 && (
+                <section>
+                  <h2 className="font-bold text-gray-900 mb-3 text-sm uppercase tracking-wide">Awaiting Response</h2>
+                  <div className="space-y-4">
+                    {pending.map(o => (
+                      <div key={o.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                        <div className="flex items-start justify-between gap-4 mb-4">
+                          <div>
+                            <p className="font-bold text-xl text-gray-900">{formatFullPrice(o.offer_price)}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">Received {formatDate(o.created_at)}</p>
+                            <p className="text-xs text-gray-400 mt-0.5">Down payment: {o.down_payment_pct}%</p>
+                            {o.preferred_closing_date && (
+                              <p className="text-xs text-gray-400">Preferred closing: {formatDate(o.preferred_closing_date)}</p>
+                            )}
+                            {o.contingencies?.length > 0 && (
+                              <p className="text-xs text-gray-400">Contingencies: {o.contingencies.join(', ')}</p>
+                            )}
+                            {o.notes && (
+                              <p className="text-sm text-gray-600 mt-2 italic">&ldquo;{o.notes}&rdquo;</p>
+                            )}
+                          </div>
+                          <span className={cn('text-xs font-semibold px-3 py-1 rounded-full capitalize shrink-0', getOfferStatusColor(o.status))}>
+                            {o.status}
+                          </span>
+                        </div>
+
+                        {/* Action buttons */}
+                        {showCounter === o.id ? (
+                          <div className="flex gap-2 items-center">
+                            <input
+                              type="number"
+                              placeholder="Counter price (₦)"
+                              value={counterInput[o.id] || ''}
+                              onChange={e => setCounterInput(prev => ({ ...prev, [o.id]: Number(e.target.value) }))}
+                              className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <button
+                              onClick={() => handleAction(o.id, 'countered', counterInput[o.id])}
+                              disabled={!counterInput[o.id] || actionLoading === o.id + 'countered'}
+                              className="px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-semibold rounded-lg flex items-center gap-1.5 transition-colors">
+                              {actionLoading === o.id + 'countered'
+                                ? <div className="w-3 h-3 border border-white/50 border-t-white rounded-full animate-spin" />
+                                : <MessageSquare size={13} />}
+                              Send Counter
+                            </button>
+                            <button onClick={() => setShowCounter(null)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2 flex-wrap">
+                            <button
+                              onClick={() => handleAction(o.id, 'accepted')}
+                              disabled={actionLoading !== null}
+                              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+                              {actionLoading === o.id + 'accepted'
+                                ? <div className="w-3 h-3 border border-white/50 border-t-white rounded-full animate-spin" />
+                                : <CheckCircle size={14} />}
+                              Accept
+                            </button>
+                            <button
+                              onClick={() => setShowCounter(o.id)}
+                              disabled={actionLoading !== null}
+                              className="flex items-center gap-1.5 px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+                              <MessageSquare size={14} /> Counter
+                            </button>
+                            <button
+                              onClick={() => handleAction(o.id, 'rejected')}
+                              disabled={actionLoading !== null}
+                              className="flex items-center gap-1.5 px-4 py-2 border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 text-sm font-semibold rounded-lg transition-colors">
+                              {actionLoading === o.id + 'rejected'
+                                ? <div className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" />
+                                : <XCircle size={14} />}
+                              Decline
+                            </button>
+                            <Link
+                              href={`/listing/${o.property_id}`}
+                              className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 text-gray-600 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors">
+                              View Listing
+                            </Link>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Resolved offers */}
+              {resolved.length > 0 && (
+                <section>
+                  <h2 className="font-bold text-gray-900 mb-3 text-sm uppercase tracking-wide text-gray-400">Resolved</h2>
+                  <div className="space-y-3">
+                    {resolved.map(o => (
+                      <div key={o.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 opacity-80">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-bold text-gray-900">{formatFullPrice(o.offer_price)}</p>
+                            <p className="text-xs text-gray-500">{formatDate(o.created_at)}</p>
+                            {o.counter_price && (
+                              <p className="text-xs text-orange-600 font-medium mt-0.5">Counter: {formatFullPrice(o.counter_price)}</p>
+                            )}
+                          </div>
+                          <span className={cn('text-xs font-semibold px-3 py-1 rounded-full capitalize', getOfferStatusColor(o.status))}>
+                            {o.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+        </div>
+        <Footer />
+      </div>
+    </div>
+  );
+}
+
+// ── Buyer: My Offers List ──────────────────────────────────────────────────────
+
+function BuyerOffersView({ user }: { user: User }) {
   const [myOffers, setMyOffers] = useState<Offer[]>([]);
   const [fetching, setFetching] = useState(true);
 
   useEffect(() => {
-    if (!loading && !user) { router.push('/auth/login'); return; }
-    if (user && propertyId) {
-      propApi.get(propertyId).then(setProperty).catch(() => {});
-    }
-    if (user) {
-      offerApi.list().then(setMyOffers).catch(() => {}).finally(() => setFetching(false));
-    }
-  }, [user, loading, propertyId, router]);
-
-  if (loading) return <div className="flex min-h-screen items-center justify-center"><div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /></div>;
-  if (!user) return null;
-
-  // If propertyId in URL and property loaded, show make-offer form
-  if (propertyId && property) {
-    return <MakeOfferForm propertyId={propertyId} property={property} />;
-  }
-
-  const role = user.role === 'agent' ? 'agent' : 'buyer';
+    offerApi.list().then(setMyOffers).catch(() => {}).finally(() => setFetching(false));
+  }, [user.id]);
 
   return (
     <div className="flex min-h-screen bg-gray-50">
-      <DashboardSidebar role={role} />
+      <DashboardSidebar role="buyer" />
       <div className="flex-1 flex flex-col">
         <div className="flex-1 p-4 md:p-8">
           <div className="mb-6">
@@ -269,6 +433,17 @@ function OffersListContent() {
                     {o.preferred_closing_date && <span>Closing: {formatDate(o.preferred_closing_date)}</span>}
                     {o.contingencies?.length > 0 && <span>{o.contingencies.length} contingencies</span>}
                   </div>
+                  <div className="mt-3 flex gap-2">
+                    <Link href={`/listing/${o.property_id}`} className="text-xs text-blue-600 hover:underline font-medium">
+                      View Property
+                    </Link>
+                    {o.status === 'sent' && (
+                      <span className="text-xs text-gray-400">· Waiting for agent response</span>
+                    )}
+                    {o.status === 'countered' && o.counter_price && (
+                      <span className="text-xs text-orange-600 font-medium">· Agent countered at {formatPrice(o.counter_price)}</span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -280,10 +455,48 @@ function OffersListContent() {
   );
 }
 
+// ── Root: dispatch by role + query ─────────────────────────────────────────────
+
+function OffersContent() {
+  const searchParams = useSearchParams();
+  const { user, loading } = useAuth();
+  const router = useRouter();
+  const propertyId = searchParams.get('propertyId');
+
+  const [property, setProperty] = useState<Property | null>(null);
+  const [loadingProp, setLoadingProp] = useState(false);
+
+  useEffect(() => {
+    if (!loading && !user) { router.push('/auth/login'); return; }
+    if (user && propertyId) {
+      setLoadingProp(true);
+      propApi.get(propertyId).then(setProperty).catch(() => {}).finally(() => setLoadingProp(false));
+    }
+  }, [user, loading, propertyId, router]);
+
+  if (loading || loadingProp) {
+    return <div className="flex min-h-screen items-center justify-center"><div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /></div>;
+  }
+  if (!user) return null;
+
+  // Buyer navigated from a listing — show the make-offer form
+  if (user.role === 'buyer' && propertyId && property) {
+    return <MakeOfferForm propertyId={propertyId} property={property} />;
+  }
+
+  // Agent sees their received offers with accept/reject/counter
+  if (user.role === 'agent' || user.role === 'admin') {
+    return <AgentOffersView user={user} />;
+  }
+
+  // Buyer sees their submitted offers
+  return <BuyerOffersView user={user} />;
+}
+
 export default function OffersPage() {
   return (
     <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /></div>}>
-      <OffersListContent />
+      <OffersContent />
     </Suspense>
   );
 }

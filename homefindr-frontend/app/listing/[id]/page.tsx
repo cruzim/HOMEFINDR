@@ -3,7 +3,7 @@
 import { useState, useEffect, use } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Heart, Share2, Phone, MessageSquare, Calendar, MapPin, BedDouble, Bath, Maximize, ChevronLeft, ChevronRight, CheckCircle, X, Play } from 'lucide-react';
+import { Heart, Share2, Phone, MessageSquare, Calendar, MapPin, BedDouble, Bath, Maximize, ChevronLeft, ChevronRight, CheckCircle, X, Play, TrendingUp } from 'lucide-react';
 import Footer from '@/components/layout/Footer';
 import PropertyCard from '@/components/features/PropertyCard';
 import { properties as api, messages as msgApi, type Property } from '@/lib/api';
@@ -206,6 +206,11 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
             <button onClick={() => setShowSchedule(true)} className="flex items-center gap-1.5 px-4 py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-sm font-semibold transition-colors">
               <Calendar size={15} /> Schedule Viewing
             </button>
+            {user?.role === 'buyer' && property.status === 'active' && (
+              <Link href={`/offers?propertyId=${id}`} className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition-colors">
+                <TrendingUp size={15} /> Make Offer
+              </Link>
+            )}
           </div>
         </div>
       </div>
@@ -278,6 +283,11 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
               <button onClick={() => setShowContact(true)} className="w-full py-3 border border-blue-200 text-blue-700 hover:bg-blue-50 font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors">
                 <MessageSquare size={16} /> Message Agent
               </button>
+              {user?.role === 'buyer' && property.status === 'active' && (
+                <Link href={`/offers?propertyId=${id}`} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors">
+                  <TrendingUp size={16} /> Make Offer
+                </Link>
+              )}
               <button onClick={toggleSave} className={cn('w-full py-3 border rounded-xl font-semibold flex items-center justify-center gap-2 transition-all',
                 saved ? 'border-red-200 text-red-600 bg-red-50' : 'border-gray-200 text-gray-700 hover:bg-gray-50')}>
                 <Heart size={16} fill={saved ? 'currentColor' : 'none'} /> {saved ? 'Saved' : 'Save'}

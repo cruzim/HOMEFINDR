@@ -10,6 +10,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.routing import Mount
 from starlette.applications import Starlette
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.core.config import settings
 from app.api.v1.router import api_router
@@ -19,6 +23,11 @@ from app.services.socketio_app import socket_app
 from app.schemas.schemas import HealthCheck
 
 logger = logging.getLogger(__name__)
+
+# ── Rate limiter ───────────────────────────────────────────────────────
+# Keyed by client IP. Shared instance — imported by endpoint modules that
+# need per-route limits (auth endpoints).
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 # ── Allowed origins (single source of truth) ──────────────────────────
 
@@ -75,6 +84,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── Rate limiter middleware ────────────────────────────────────────────
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
 # ── CORS middleware ────────────────────────────────────────────────────
 
 app.add_middleware(
@@ -92,6 +106,20 @@ async def add_process_time_header(request: Request, call_next):
     start = time.perf_counter()
     response = await call_next(request)
     response.headers["X-Process-Time"] = f"{(time.perf_counter() - start) * 1000:.2f}ms"
+    return response
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """AUDIT FIX [6.7]: Add HTTP security headers to every response."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    # HSTS — only add on production to avoid breaking local HTTP dev
+    if settings.is_production:
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     return response
 
 # ── Global exception handlers ──────────────────────────────────────────
